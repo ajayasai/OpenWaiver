@@ -1,0 +1,15 @@
+# Replace scopes/revision and explicitly pin run IDs when multiple runs match.
+# Unlisted streams are not checked. Review this checklist with your signoff owner.
+schema_version: 1
+project: example-chip
+revision: candidate-A
+max_age_hours: 24
+checks:
+  - stream: rtl-lint
+    tool: verilator
+    categories: [lint]
+    # run_id: run_REPLACE_WITH_ACTUAL_ID
+  - stream: physical-drc
+    tool: klayout
+    categories: [drc]
+    # run_id: run_REPLACE_WITH_ACTUAL_ID

@@ -1,0 +1,6 @@
+include LICENSE README.md SECURITY.md CONTRIBUTING.md CHANGELOG.md Dockerfile compose.yaml
+recursive-include docs *.md *.png *.json *.xml
+recursive-include examples *.json *.csv *.xml *.txt *.log *.sarif *.lyrdb *.yaml
+recursive-include scripts *.py
+recursive-include tests *.py
+recursive-include src/openwaiver/static *.html *.css *.js

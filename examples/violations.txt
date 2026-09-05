@@ -1,0 +1,2 @@
+# SYNTHETIC example, exact eight-column grammar
+lint|warning|WIDTH|top/u1|rtl/top.sv|21|2|Signal has width 32, expected 16

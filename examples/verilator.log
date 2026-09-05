@@ -1,0 +1,2 @@
+%Warning-WIDTH: rtl/top.sv:21:2: Signal has width 32, expected 16
+%Error: Exiting due to 1 warning(s)

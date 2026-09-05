@@ -1,0 +1,16 @@
+services:
+  openwaiver:
+    build: .
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - openwaiver-data:/data
+      - ./workspace/container-auth.json:/run/secrets/openwaiver-auth.json:ro
+    environment:
+      OPENWAIVER_ALLOWED_HOSTS: localhost,127.0.0.1
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  openwaiver-data:

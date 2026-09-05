@@ -1,0 +1,18 @@
+schema_version: 1
+require_evidence: true
+require_context_across_revisions: true
+max_waiver_days: 90
+min_approvals: 1
+critical_approvals: 2
+high_risk_categories:
+- cdc
+- rdc
+- timing
+forbidden_rules: []
+gate_severities:
+- warning
+- error
+- critical
+candidate_limit: 256
+line_movement_limit: 80
+geometry_movement_limit: 100.0

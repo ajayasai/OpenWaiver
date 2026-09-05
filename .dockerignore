@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+workspace
+*-workspace
+*.sqlite*
+auth.json
+*.key
+*.pem
+.env*
+dist
+build
+docs/screenshots

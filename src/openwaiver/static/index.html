@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="OpenWaiver — a cross-tool EDA waiver lifecycle workspace">
+  <title>OpenWaiver · Verification workspace</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#"><span class="brand-mark">W<span>·</span></span><span>OpenWaiver<small>VERIFICATION WORKSPACE</small></span></a>
+    <div class="side-label">WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <button data-view="overview" class="nav active"><span>◫</span>Overview</button>
+      <button data-view="violations" class="nav"><span>◇</span>Violations<span id="nav-count" class="nav-count">0</span></button>
+      <button data-view="waivers" class="nav"><span>▤</span>Waiver register</button>
+      <button data-view="compare" class="nav"><span>⇄</span>Tapeout comparison</button>
+      <button data-view="audit" class="nav"><span>◷</span>Audit trail</button>
+      <button data-view="policy" class="nav"><span>⚙</span>Policy</button>
+    </nav>
+    <div class="side-card"><span class="live-dot"></span> Local-first by design<p>Review decisions stay with your team. No external services or telemetry.</p></div>
+    <div class="sidebar-bottom"><div class="avatar" id="avatar">OW</div><div><strong id="identity">Not signed in</strong><small id="role">Authenticated access</small></div><button id="logout" class="icon-button" title="Sign out" aria-label="Sign out">↪</button></div>
+  </aside>
+  <div class="shell">
+    <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="project">OpenWaiver</strong></div><div class="top-right"><span class="version">v0.1.0</span><span class="privacy-dot"></span> <span id="mode-label">Private workspace</span></div></header>
+    <div id="preview-banner" class="preview-banner hidden">READ-ONLY SYNTHETIC PREVIEW · Run the application to import, propose and review real records.</div>
+    <main>
+      <section class="page-heading"><div><div class="eyebrow">CROSS-TOOL VERIFICATION</div><h1 id="page-title">Waiver overview</h1><p id="page-description">One place to understand every exception. Nothing waived silently.</p></div><button id="import-open" class="button primary">＋ Import run</button></section>
+      <div class="context-bar"><label for="run-select">DESIGN RUN</label><select id="run-select" aria-label="Design run"></select><span id="run-meta" class="muted"></span><div class="context-actions"><select id="export-format" aria-label="Export format"><option value="json">JSON</option><option value="sarif">SARIF</option><option value="html">HTML report</option><option value="junit">JUnit</option></select><button id="export" class="button small">Export ↗</button><button id="refresh" class="button small" title="Refresh">↻</button></div></div>
+      <section id="overview-view" class="view"></section>
+      <section id="violations-view" class="view hidden"><div class="panel"><div class="filterbar"><input id="search" type="search" placeholder="Search rule, hierarchy or message…" aria-label="Search findings"><select id="status-filter" aria-label="Status filter"><option value="">All statuses</option><option>open</option><option>waived</option><option>needs_review</option><option>stale</option><option>pending</option><option>expired</option><option>ambiguous</option><option>rejected</option></select><select id="category-filter" aria-label="Category filter"><option value="">All checks</option><option>drc</option><option>lvs</option><option>erc</option><option>lint</option><option>cdc</option><option>rdc</option><option>low_power</option><option>coverage</option><option>timing</option></select></div><div class="table-wrap"><table><thead><tr><th>Rule / finding</th><th>Check</th><th>Location</th><th>Severity</th><th>Status</th><th></th></tr></thead><tbody id="findings-body"></tbody></table></div><div class="pagination"><span id="page-info"></span><div><button id="prev-page" class="button small">← Previous</button><button id="next-page" class="button small">Next →</button></div></div></div></section>
+      <section id="waivers-view" class="view hidden"></section>
+      <section id="compare-view" class="view hidden"></section>
+      <section id="audit-view" class="view hidden"></section>
+      <section id="policy-view" class="view hidden"></section>
+      <footer>OpenWaiver <span>·</span> Approximate matches always require fresh review. <span>·</span> A waiver is not verification signoff.</footer>
+    </main>
+  </div>
+  <div id="drawer-shade" class="drawer-shade hidden"></div><aside id="drawer" class="drawer hidden" aria-label="Record detail"></aside>
+  <dialog id="login-dialog"><div class="login-mark">W·</div><div class="eyebrow">YOUR LOCAL VERIFICATION WORKSPACE</div><h2>Welcome to OpenWaiver</h2><p>Paste the access token generated by your workspace administrator. The token is held in memory, not browser storage.</p><form id="login-form"><label>Access token<input id="login-token" type="password" autocomplete="off" required placeholder="Paste your bearer token"></label><div id="login-error" class="error"></div><button class="button primary wide" type="submit">Open workspace →</button></form><small>Start a sample workspace with <code>openwaiver demo --serve</code>.</small></dialog>
+  <dialog id="modal"></dialog>
+  <div id="toast" role="status" class="toast hidden"></div>
+</body>
+</html>
