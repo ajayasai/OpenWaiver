@@ -8,7 +8,7 @@ from urllib.parse import quote
 import xml.etree.ElementTree as ET
 
 from .errors import OpenWaiverError
-from .identity import canonical
+from .identity import canonical, normalize_path
 
 
 def sarif(result: dict) -> str:
@@ -78,6 +78,12 @@ def verilator(result: dict, *, acknowledge_lossy: bool = False) -> str:
         raise OpenWaiverError("native file/rule/line controls are lossy; explicit acknowledge_lossy required")
     if not result["complete"]:
         raise OpenWaiverError("native export requires a complete unfiltered source run")
+    def native_scope(row):
+        v = row["violation"]
+        return (v["rule"], normalize_path(v["path"]), v["line"])
+    waived_scopes = {native_scope(r) for r in result["violations"] if r["status"] == "waived"}
+    if any(r["status"] != "waived" and native_scope(r) in waived_scopes for r in result["violations"]):
+        raise OpenWaiverError("native control would also suppress an unapproved finding on the same rule/file/line")
     lines = ["`verilator_config", "// GENERATED DERIVATIVE; not an approval ledger.",
              "// Regenerate after an UNFILTERED OpenWaiver gate for this exact revision.",
              "// File/rule/line cannot enforce context, expiry, hierarchy or message identity."]

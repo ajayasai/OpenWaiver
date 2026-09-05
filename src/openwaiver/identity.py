@@ -111,8 +111,8 @@ def similarity(old: Violation, new: Violation, policy: Policy) -> tuple[float, l
         ay = [p[1] for p in a.points]
         bx = [p[0] for p in b.points]
         by = [p[1] for p in b.points]
-        distance = math.hypot((max(ax) + min(ax) - max(bx) - min(bx)) / 2,
-                              (max(ay) + min(ay) - max(by) - min(by)) / 2)
+        distance = math.hypot((max(ax) / 2 + min(ax) / 2) - (max(bx) / 2 + min(bx) / 2),
+                              (max(ay) / 2 + min(ay) / 2) - (max(by) / 2 + min(by) / 2))
         if distance > policy.geometry_movement_limit:
             return 0.0, []
         if all(geometry_identity(x, True) == geometry_identity(y, True)

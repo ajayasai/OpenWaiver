@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from datetime import date
 
 from .identity import approval_digest, bucket, fingerprint, similarity
+from .candidate_index import CandidateIndex
 from .models import Policy, Run, Waiver
 
 
@@ -51,19 +52,15 @@ def effective_problems(w: Waiver, run: Run, current, policy: Policy, today: date
 def assess(run: Run, waivers: list[Waiver], policy: Policy, today: date) -> dict:
     scoped = [w for w in waivers if w.scope == run.scope]
     exact = defaultdict(list)
-    candidates = defaultdict(list)
-    object_candidates = defaultdict(list)
     occurrences = defaultdict(list)
     for v in run.violations:
         occurrences[fingerprint(v)].append(v)
     for w in scoped:
         if w.status != "revoked":
             exact[w.fingerprint].append(w)
-            candidates[bucket(w.target)].append(w)
-            if w.target.object_id:
-                object_candidates[(w.target.category, w.target.rule, w.target.object_id)].append(w)
     rows, matched, candidate_seen = [], set(), set()
-    truncated = set()
+    index = CandidateIndex(scoped, policy)
+    truncated_buckets, truncated_objects = set(), set()
     for v in run.violations:
         fp = fingerprint(v)
         hits = exact.get(fp, [])
@@ -87,12 +84,11 @@ def assess(run: Run, waivers: list[Waiver], policy: Policy, today: date) -> dict
                     row["status"] = "stale"
                 row["reasons"] = problems
         else:
-            pool = list(candidates.get(bucket(v), []))
-            if v.object_id:
-                pool += object_candidates.get((v.category, v.rule, v.object_id), [])
-            pool = list({w.id: w for w in pool}.values())
-            if len(pool) > policy.candidate_limit:
-                truncated.update(w.id for w in pool)
+            pool, overflow = index.query(v)
+            if overflow:
+                truncated_buckets.add(bucket(v))
+                if v.object_id:
+                    truncated_objects.add((v.category, v.rule, v.object_id))
                 row.update(status="ambiguous", reasons=["candidate budget exceeded; narrow check stream"])
             else:
                 for w in pool:
@@ -123,7 +119,8 @@ def assess(run: Run, waivers: list[Waiver], policy: Policy, today: date) -> dict
             state = "active" if states == {"waived"} else sorted(states)[0]
         elif w.id in candidate_seen:
             state = "needs_review"
-        elif w.id in truncated:
+        elif (bucket(w.target) in truncated_buckets or
+              (w.target.category, w.target.rule, w.target.object_id) in truncated_objects):
             state = "not_observed"
         elif run.complete and w.target.category in run.checked_categories:
             state = "unused"

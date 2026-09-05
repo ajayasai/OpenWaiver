@@ -4,9 +4,17 @@
 
 OpenWaiver is a local-first application for DRC, LVS, ERC, lint, CDC, RDC, low-power checks, coverage exclusions and timing exceptions. It combines an authenticated browser workspace, a Python API, a command-line interface, SQLite storage and deterministic Git-friendly YAML exports.
 
-**Version 0.1.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
+**Version 0.2.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
 
 ![Synthetic OpenWaiver workspace](docs/screenshots/overview.png)
+
+## New in 0.2.0
+
+Project-scoped, expiring/revocable tokens; indexed movement candidates; explicit dependency-graph context; atomic Git-reviewable proposal plans in the browser/API/CLI; offline Ed25519 signatures and ledger checkpoints; independent evidence-bundle replay; and a native-export guard against unapproved same-line suppression.
+
+Local validation: **283 passing tests, 90.76% line coverage**. In one constructed 10,000-finding repeated-rule workload, median pure-engine assessment improved **25.7x versus v0.1**, while recovering all intended review candidates without automatically waiving any changed finding. This is not a commercial benchmark. CI separately tests native Verilator and authenticated browser workflows; inspect the exact commit's checks rather than inferring success from a feature list.
+
+Read [the 0.2 guide, migration details and raw measurements](docs/V0.2.md) and [the evidence-based competitive assessment](docs/COMPETITIVE_EVIDENCE.md).
 
 ## Start with synthetic data
 
@@ -47,18 +55,18 @@ The reference chip and every approval/evidence item in this demo are **synthetic
 
 ## Use a real workspace
 
-Generate different tokens for different people. Save each printed plaintext token securely; the registry stores only hashes. Restart the server after changing the registry.
+Generate different tokens for different people. Save each printed plaintext token securely; the registry stores only hashes. The server reloads expiry, revocation and project grants on each authenticated request; malformed registry edits fail closed.
 
 ```bash
 openwaiver --db workspace/chip.sqlite3 init
-openwaiver auth-create --file workspace/auth.json --name alice --auth-role contributor
-openwaiver auth-create --file workspace/auth.json --name bob --auth-role reviewer
-openwaiver auth-create --file workspace/auth.json --name carol --auth-role reviewer
-openwaiver auth-create --file workspace/auth.json --name admin --auth-role admin
+openwaiver auth-create --file workspace/auth.json --name alice --auth-role contributor --project example-chip
+openwaiver auth-create --file workspace/auth.json --name bob --auth-role reviewer --project example-chip
+openwaiver auth-create --file workspace/auth.json --name carol --auth-role reviewer --project example-chip
+openwaiver auth-create --file workspace/auth.json --name admin --auth-role admin --all-projects
 openwaiver --db workspace/chip.sqlite3 serve --auth-file workspace/auth.json
 ```
 
-Use the browser for authenticated human approvals. CLI `--actor` and `--role` are **trusted local attribution**, not authentication against someone who can modify the local files. All users of one API workspace can read that workspace; this release does not implement tenant or project-level access isolation.
+Use the browser for authenticated human approvals. CLI `--actor` and `--role` are **trusted local attribution**, not authentication against someone who can modify the local files. API tokens can be restricted to exact project names; the examples grant access to `example-chip`. Workspace-wide grants are explicit. Legacy registries without project grants retain workspace-wide access and should be migrated. This is application-level authorization, not separate-database tenant isolation.
 
 Import an **unfiltered** report. `--complete` is an explicit assertion by your trusted collection pipeline, not something the parser can independently prove:
 
@@ -96,7 +104,7 @@ openwaiver --db workspace/chip.sqlite3 export RUN_ID --format verilator \
   --acknowledge-lossy --output generated.vlt
 ```
 
-Generate this derivative only after checking an **unfiltered report for the same revision**. Never feed an already filtered report back as proof that all checks ran. Unsafe native identifiers, wildcards and aggregate geometry markers are not silently broadened into waivers.
+Export is refused if its native rule/file/line scope also contains an unapproved finding. Generate this derivative only after checking an **unfiltered report for the same revision**. Never feed an already filtered report back as proof that all checks ran. Unsafe native identifiers, wildcards and aggregate geometry markers are not silently broadened into waivers.
 
 **Calibre/IC Validator/SpyGlass/Questa proprietary waiver syntax is not implemented or certified.** Use documented neutral exports and add release-specific adapters with official specifications and test fixtures. The generic XML importer does not mean arbitrary vendor XML is supported. Timing exceptions and coverage exclusions are managed as records; this software does not validate their electrical or functional correctness.
 
@@ -119,6 +127,7 @@ python -m pip install -e '.[dev,browser]'
 python -m pytest --cov=openwaiver --cov-report=term-missing
 python -m compileall -q src tests scripts
 node --check src/openwaiver/static/app.js
+node --check src/openwaiver/static/plans.js
 playwright install chromium
 python scripts/browser_smoke.py
 python scripts/benchmark.py --sizes 1000 10000 --output benchmark.json
