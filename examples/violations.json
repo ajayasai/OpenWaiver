@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "violations": [
+    {
+      "id": "example-1",
+      "category": "lint",
+      "rule": "WIDTH",
+      "severity": "warning",
+      "message": "Signal has width 32, expected 16",
+      "hierarchy": "top/u1",
+      "path": "rtl/top.sv",
+      "line": 21,
+      "column": 2
+    }
+  ]
+}

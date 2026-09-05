@@ -1,0 +1,10 @@
+{
+  "wheel": "openwaiver-0.1.0-py3-none-any.whl",
+  "installed_without_dependency_downloads": true,
+  "dependency_source": "existing validated Python runtime; wheel installed into a temporary target directory",
+  "imports_from_installed_wheel": true,
+  "static_assets_present": true,
+  "cli_version": "0.1.0",
+  "installed_wheel_tests": "........................................................................ [ 37%]\n........................................................................ [ 74%]\n.................................................                        [100%]",
+  "passed": true
+}

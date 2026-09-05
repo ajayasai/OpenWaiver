@@ -1,0 +1,8 @@
+{
+  "source_commit": "505e14acf56027abf62619abd11ac945b5120924",
+  "run_id": "33960633087",
+  "python": "3.13.15",
+  "synthetic_only": true,
+  "source_hashes_match_original_local_validation": true,
+  "tests_xml_sha256": "7fb206d1d471d812b8397c1659b26c0b97c3fe6141fa8cda8cd89e57112ea660"
+}

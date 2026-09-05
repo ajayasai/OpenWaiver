@@ -1,0 +1,17 @@
+{
+  "created_at": "2026-09-05T10:26:36.951544+00:00",
+  "browser": "Chromium",
+  "checks": [
+    "authenticated live overview and real calculated counters",
+    "finding search, effective-state filter and geometry inspection",
+    "waiver register and historical audit content",
+    "immutable snapshot comparison",
+    "audit verification and viewer read-only policy",
+    "browser end-to-end propose, attach, submit, independent approve and effective recalculation",
+    "no persisted token in localStorage or sessionStorage",
+    "390px responsive layout without document horizontal overflow"
+  ],
+  "passed": true,
+  "errors": [],
+  "synthetic_only": true
+}

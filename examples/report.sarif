@@ -1,0 +1,34 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "example-analyzer"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "WIDTH",
+          "level": "warning",
+          "message": {
+            "text": "Signal has width 32, expected 16"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "rtl/top.sv"
+                },
+                "region": {
+                  "startLine": 21,
+                  "startColumn": 2
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

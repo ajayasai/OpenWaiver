@@ -1,0 +1,19 @@
+{
+  "python": "3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.41",
+  "dependencies": {
+    "fastapi": "0.128.2",
+    "pydantic": "2.13.4",
+    "uvicorn": "0.48.0",
+    "PyYAML": "6.0.3",
+    "defusedxml": "0.7.1",
+    "starlette": "0.50.0",
+    "pytest": "9.0.2",
+    "pytest-cov": "7.0.0",
+    "httpx": "0.28.1",
+    "playwright": "1.57.0",
+    "setuptools": "82.0.1"
+  },
+  "node": "v22.16.0",
+  "chromium": "Chromium 144.0.7559.96 built on Debian GNU/Linux 13 (trixie)"
+}

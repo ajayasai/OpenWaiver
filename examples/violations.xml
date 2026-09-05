@@ -1,0 +1,13 @@
+<violations schema_version="1">
+  <violation>
+    <id>example-1</id>
+    <category>lint</category>
+    <rule>WIDTH</rule>
+    <severity>warning</severity>
+    <message>Signal has width 32, expected 16</message>
+    <hierarchy>top/u1</hierarchy>
+    <path>rtl/top.sv</path>
+    <line>21</line>
+    <column>2</column>
+  </violation>
+</violations>
