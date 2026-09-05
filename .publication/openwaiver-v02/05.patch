@@ -1,0 +1,452 @@
+diff --git a/src/openwaiver/context.py b/src/openwaiver/context.py
+new file mode 100644
+index 0000000..c1b7046
+--- /dev/null
++++ b/src/openwaiver/context.py
+@@ -0,0 +1,155 @@
++"""Content-derived dependency-cone evidence, not guessed text windows.
++
++A trusted build adapter supplies the explicit graph. Hashes prove only the declared
++inputs: they do not prove a dependency graph is complete or an EDA run occurred.
++"""
++from __future__ import annotations
++
++from collections import defaultdict, deque
++import hashlib
++from pathlib import Path, PurePosixPath
++from typing import Literal
++
++from pydantic import Field, model_validator
++
++from .errors import OpenWaiverError
++from .identity import digest
++from .models import Model, Scope, Violation
++
++
++def safe_path(value: str) -> str:
++    if (not value or "\\" in value or ":" in value or any(ord(c) < 32 for c in value)
++            or PurePosixPath(value).is_absolute() or str(PurePosixPath(value)) != value
++            or any(x in (".", "..", "") for x in value.split("/"))):
++        raise ValueError("dependency path must be a canonical workspace-relative POSIX path")
++    return value
++
++
++class DependencyNode(Model):
++    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
++    dependencies: list[str] = Field(default_factory=list, max_length=10000)
++
++
++class ContextManifest(Model):
++    schema_version: Literal[1] = 1
++    scope: Scope
++    revision: str = Field(min_length=1)
++    # Settings must include semantic build inputs (defines, include order, corners).
++    settings: dict[str, str] = Field(default_factory=dict, max_length=10000)
++    nodes: dict[str, DependencyNode] = Field(min_length=1, max_length=100000)
++    targets: dict[str, list[str]] = Field(min_length=1, max_length=250000)
++
++    @model_validator(mode="after")
++    def graph(self):
++        for name, node in self.nodes.items():
++            safe_path(name)
++            if len(node.dependencies) != len(set(node.dependencies)):
++                raise ValueError("duplicate dependency")
++            if any(dep not in self.nodes for dep in node.dependencies):
++                raise ValueError("dependency references a missing node")
++        for marker, roots in self.targets.items():
++            if not marker or not roots or len(roots) != len(set(roots)):
++                raise ValueError("each target needs distinct nonempty dependency roots")
++            if any(root not in self.nodes for root in roots):
++                raise ValueError("target references a missing node")
++        self.node_hashes()  # Also rejects cycles without recursive Python calls.
++        return self
++
++    def node_hashes(self) -> dict[str, str]:
++        parents = defaultdict(list)
++        degree = {}
++        for path, node in self.nodes.items():
++            degree[path] = len(node.dependencies)
++            for dep in node.dependencies:
++                parents[dep].append(path)
++        ready = deque(path for path, size in degree.items() if size == 0)
++        hashed = {}
++        while ready:
++            path = ready.popleft()
++            node = self.nodes[path]
++            hashed[path] = digest({"domain": "openwaiver.dependency.v1", "path": path,
++                "sha256": node.sha256,
++                "dependencies": {d: hashed[d] for d in sorted(node.dependencies)}})
++            for parent in parents[path]:
++                degree[parent] -= 1
++                if degree[parent] == 0:
++                    ready.append(parent)
++        if len(hashed) != len(self.nodes):
++            raise ValueError("dependency graph contains a cycle")
++        return hashed
++
++    def context_hashes(self) -> dict[str, str]:
++        hashed = self.node_hashes()
++        return {marker: digest({"domain": "openwaiver.context.v1", "scope": self.scope.model_dump(),
++                "settings": self.settings, "roots": {r: hashed[r] for r in sorted(roots)}})
++                for marker, roots in self.targets.items()}
++
++
++def bind_context(violations: list[Violation], manifest: ContextManifest, scope: Scope,
++                 revision: str) -> list[Violation]:
++    if manifest.scope != scope or manifest.revision != revision:
++        raise OpenWaiverError("context manifest project/tool/stream or revision does not match the run")
++    if set(manifest.targets) != {v.id for v in violations}:
++        raise OpenWaiverError("context manifest must cover exactly every imported occurrence ID")
++    hashes = manifest.context_hashes()
++    result = []
++    for v in violations:
++        if v.context_hash and v.context_hash != hashes[v.id]:
++            raise OpenWaiverError("report context hash disagrees with computed dependency evidence")
++        result.append(Violation.model_validate({**v.model_dump(), "context_hash": hashes[v.id]}))
++    return result
++
++
++def build_context(root: Path, specification: dict) -> ContextManifest:
++    """Replace each declared node's hash with actual local bytes; no filesystem discovery.
++
++    Input uses the ContextManifest shape, but each node only supplies dependencies.
++    Run against an immutable checkout: local filesystem operators remain trusted.
++    """
++    root = root.resolve(strict=True)
++    if not isinstance(specification, dict) or not isinstance(specification.get("nodes"), dict):
++        raise OpenWaiverError("dependency specification must contain a nodes mapping")
++    spec = dict(specification)
++    if any(not isinstance(node, dict) for node in spec["nodes"].values()):
++        raise OpenWaiverError("each dependency node must be a mapping")
++    # Validate schema, graph and resource counts before touching any dependency file.
++    checked = ContextManifest.model_validate({**spec, "nodes": {
++        name: {**node, "sha256": "0" * 64} for name, node in spec["nodes"].items()}})
++    nodes, total = {}, 0
++    for name, checked_node in checked.nodes.items():
++        node = checked_node.model_dump()
++        safe_path(name)
++        path = root
++        for component in name.split("/"):
++            path = path / component
++            if path.is_symlink():
++                raise OpenWaiverError("symlink dependency rejected")
++        if not path.is_file() or not path.resolve().is_relative_to(root):
++            raise OpenWaiverError("dependency is missing or outside workspace")
++        h, count = hashlib.sha256(), 0
++        with path.open("rb") as stream:
++            while chunk := stream.read(1024 * 1024):
++                count += len(chunk)
++                total += len(chunk)
++                if count > 64 * 1024 * 1024 or total > 512 * 1024 * 1024:
++                    raise OpenWaiverError("dependency input byte budget exceeded")
++                h.update(chunk)
++        nodes[name] = {**node, "sha256": h.hexdigest()}
++    spec["nodes"] = nodes
++    return ContextManifest.model_validate(spec)
++
++
++def compare_context(before: ContextManifest, after: ContextManifest) -> dict:
++    if before.scope != after.scope:
++        raise OpenWaiverError("cannot compare dependency evidence across different scopes")
++    old, new = before.context_hashes(), after.context_hashes()
++    common = before.nodes.keys() & after.nodes.keys()
++    return {"before_revision": before.revision, "after_revision": after.revision,
++            "files_added": sorted(after.nodes.keys() - before.nodes.keys()),
++            "files_removed": sorted(before.nodes.keys() - after.nodes.keys()),
++            "content_changed": sorted(p for p in common if before.nodes[p].sha256 != after.nodes[p].sha256),
++            "dependencies_changed": sorted(p for p in common if set(before.nodes[p].dependencies) != set(after.nodes[p].dependencies)),
++            "settings_changed": before.settings != after.settings,
++            "targets_impacted": sorted(k for k in old.keys() | new.keys() if old.get(k) != new.get(k)),
++            "targets_unchanged": sorted(k for k in old.keys() & new.keys() if old[k] == new[k]),
++            "before_sha256": digest(before), "after_sha256": digest(after)}
+diff --git a/src/openwaiver/engine.py b/src/openwaiver/engine.py
+index 2471d7d..89884aa 100644
+--- a/src/openwaiver/engine.py
++++ b/src/openwaiver/engine.py
+@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
+ from datetime import date
+ 
+ from .identity import approval_digest, bucket, fingerprint, similarity
++from .candidate_index import CandidateIndex
+ from .models import Policy, Run, Waiver
+ 
+ 
+@@ -51,19 +52,15 @@ def effective_problems(w: Waiver, run: Run, current, policy: Policy, today: date
+ def assess(run: Run, waivers: list[Waiver], policy: Policy, today: date) -> dict:
+     scoped = [w for w in waivers if w.scope == run.scope]
+     exact = defaultdict(list)
+-    candidates = defaultdict(list)
+-    object_candidates = defaultdict(list)
+     occurrences = defaultdict(list)
+     for v in run.violations:
+         occurrences[fingerprint(v)].append(v)
+     for w in scoped:
+         if w.status != "revoked":
+             exact[w.fingerprint].append(w)
+-            candidates[bucket(w.target)].append(w)
+-            if w.target.object_id:
+-                object_candidates[(w.target.category, w.target.rule, w.target.object_id)].append(w)
+     rows, matched, candidate_seen = [], set(), set()
+-    truncated = set()
++    index = CandidateIndex(scoped, policy)
++    truncated_buckets, truncated_objects = set(), set()
+     for v in run.violations:
+         fp = fingerprint(v)
+         hits = exact.get(fp, [])
+@@ -87,12 +84,11 @@ def assess(run: Run, waivers: list[Waiver], policy: Policy, today: date) -> dict
+                     row["status"] = "stale"
+                 row["reasons"] = problems
+         else:
+-            pool = list(candidates.get(bucket(v), []))
+-            if v.object_id:
+-                pool += object_candidates.get((v.category, v.rule, v.object_id), [])
+-            pool = list({w.id: w for w in pool}.values())
+-            if len(pool) > policy.candidate_limit:
+-                truncated.update(w.id for w in pool)
++            pool, overflow = index.query(v)
++            if overflow:
++                truncated_buckets.add(bucket(v))
++                if v.object_id:
++                    truncated_objects.add((v.category, v.rule, v.object_id))
+                 row.update(status="ambiguous", reasons=["candidate budget exceeded; narrow check stream"])
+             else:
+                 for w in pool:
+@@ -123,7 +119,8 @@ def assess(run: Run, waivers: list[Waiver], policy: Policy, today: date) -> dict
+             state = "active" if states == {"waived"} else sorted(states)[0]
+         elif w.id in candidate_seen:
+             state = "needs_review"
+-        elif w.id in truncated:
++        elif (bucket(w.target) in truncated_buckets or
++              (w.target.category, w.target.rule, w.target.object_id) in truncated_objects):
+             state = "not_observed"
+         elif run.complete and w.target.category in run.checked_categories:
+             state = "unused"
+diff --git a/src/openwaiver/evidence.py b/src/openwaiver/evidence.py
+new file mode 100644
+index 0000000..ebd9cc5
+--- /dev/null
++++ b/src/openwaiver/evidence.py
+@@ -0,0 +1,84 @@
++"""Semantic evidence-bundle verification independent of the original database."""
++from __future__ import annotations
++
++from datetime import date
++import hashlib
++import io
++import zipfile
++
++from .engine import assess
++from .errors import IntegrityError
++from .identity import digest
++from .importers import strict_json
++from .interchange import verify_bundle
++from .models import Snapshot
++from .store import GENESIS
++
++
++def verify_evidence(data: bytes) -> dict:
++    """Check hashes, audit prefix, frozen records, attachments and policy replay.
++
++    No public key is accepted from inside the bundle. Use verify_file with an
++    independently distributed public key for authenticity. A self-consistent,
++    unsigned package is still untrusted, even after successful semantic checks.
++    """
++    basic = verify_bundle(data)
++    try:
++        with zipfile.ZipFile(io.BytesIO(data)) as archive:
++            manifest = strict_json(archive.read("manifest.json").decode())
++            snapshot = Snapshot.model_validate(strict_json(archive.read("snapshot.json").decode()))
++            events = [strict_json(line) for line in archive.read("audit.jsonl").decode().splitlines()]
++            if not events:
++                raise IntegrityError("bundle audit history is empty")
++            previous, seen = GENESIS, {}
++            for number, original in enumerate(events, 1):
++                event = dict(original)
++                hash_value = event.pop("hash")
++                if event["seq"] != number or event["previous"] != previous or digest(event) != hash_value:
++                    raise IntegrityError("bundle audit chain or sequence is invalid")
++                if "record" in event and digest(event["record"]) != event["content_digest"]:
++                    raise IntegrityError("historical waiver content does not match its audit event")
++                seen[(event["entity"], event["id"])] = event["content_digest"]
++                previous = hash_value
++            freeze = events[-1]
++            if (manifest["snapshot_id"] != snapshot.id or manifest["audit_head"] != previous
++                    or freeze["entity"] != "snapshots" or freeze["id"] != snapshot.id
++                    or freeze["content_digest"] != digest(snapshot)
++                    or freeze["previous"] != snapshot.audit_head):
++                raise IntegrityError("snapshot is not bound to the committed audit prefix")
++            if seen.get(("runs", snapshot.run.id)) != digest(snapshot.run):
++                raise IntegrityError("snapshot run differs from its audited import")
++            if seen.get(("policy", "policy")) != digest(snapshot.policy):
++                raise IntegrityError("snapshot policy differs from its audited version")
++            expected_waivers = set()
++            from .interchange import load_yaml
++            for waiver in snapshot.waivers:
++                if waiver.scope != snapshot.run.scope:
++                    raise IntegrityError("snapshot contains a waiver from another check stream")
++                if seen.get(("waivers", waiver.id)) != digest(waiver):
++                    raise IntegrityError("snapshot waiver differs from its audited revision")
++                name = f"waivers/{waiver.id}.yaml"
++                expected_waivers.add(name)
++                if digest(load_yaml(archive.read(name).decode())) != digest(waiver):
++                    raise IntegrityError("YAML waiver differs from the frozen record")
++                for evidence in waiver.evidence:
++                    raw = archive.read(f"evidence/{evidence.sha256}")
++                    if len(raw) != evidence.size or hashlib.sha256(raw).hexdigest() != evidence.sha256:
++                        raise IntegrityError("evidence differs from the reviewed attachment")
++                    if seen.get(("evidence", evidence.sha256)) != evidence.sha256:
++                        raise IntegrityError("attachment was not included in the audit prefix")
++            if {n for n in archive.namelist() if n.startswith("waivers/")} != expected_waivers:
++                raise IntegrityError("bundle waiver membership differs from snapshot")
++            if len({w.id for w in snapshot.waivers}) != len(snapshot.waivers):
++                raise IntegrityError("duplicate snapshot waiver ID")
++            assessed_on = date.fromisoformat(snapshot.assessment["assessed_on"])
++            replay = assess(snapshot.run, snapshot.waivers, snapshot.policy, assessed_on)
++            if replay != snapshot.assessment:
++                raise IntegrityError("recorded assessment differs from replay under this engine; review engine-version compatibility")
++        return {**basic, "audit_verified": True, "frozen_records_verified": True,
++                "assessment_replayed": True, "signature_verified": False,
++                "notice": "Internal consistency is not authenticity. Verify an external signature or pinned digest."}
++    except IntegrityError:
++        raise
++    except (ValueError, KeyError, TypeError, AttributeError, UnicodeDecodeError) as exc:
++        raise IntegrityError("malformed semantic evidence bundle") from exc
+diff --git a/src/openwaiver/exporters.py b/src/openwaiver/exporters.py
+index e7a0836..a20148e 100644
+--- a/src/openwaiver/exporters.py
++++ b/src/openwaiver/exporters.py
+@@ -8,7 +8,7 @@ from urllib.parse import quote
+ import xml.etree.ElementTree as ET
+ 
+ from .errors import OpenWaiverError
+-from .identity import canonical
++from .identity import canonical, normalize_path
+ 
+ 
+ def sarif(result: dict) -> str:
+@@ -78,6 +78,12 @@ def verilator(result: dict, *, acknowledge_lossy: bool = False) -> str:
+         raise OpenWaiverError("native file/rule/line controls are lossy; explicit acknowledge_lossy required")
+     if not result["complete"]:
+         raise OpenWaiverError("native export requires a complete unfiltered source run")
++    def native_scope(row):
++        v = row["violation"]
++        return (v["rule"], normalize_path(v["path"]), v["line"])
++    waived_scopes = {native_scope(r) for r in result["violations"] if r["status"] == "waived"}
++    if any(r["status"] != "waived" and native_scope(r) in waived_scopes for r in result["violations"]):
++        raise OpenWaiverError("native control would also suppress an unapproved finding on the same rule/file/line")
+     lines = ["`verilator_config", "// GENERATED DERIVATIVE; not an approval ledger.",
+              "// Regenerate after an UNFILTERED OpenWaiver gate for this exact revision.",
+              "// File/rule/line cannot enforce context, expiry, hierarchy or message identity."]
+diff --git a/src/openwaiver/extensions.py b/src/openwaiver/extensions.py
+new file mode 100644
+index 0000000..79af7fc
+--- /dev/null
++++ b/src/openwaiver/extensions.py
+@@ -0,0 +1,55 @@
++"""Project-aware API routes for review plans and explicit dependency comparisons."""
++from __future__ import annotations
++
++from datetime import date
++import yaml
++from fastapi import Depends
++from pydantic import Field
++
++from .context import ContextManifest, compare_context
++from .interchange import load_yaml
++from .models import Model, Principal
++from .plans import ReviewPlan, apply_plan, preview_plan, proposal_template
++
++
++class PlanText(Model):
++    yaml: str = Field(min_length=1, max_length=4 * 1024 * 1024)
++
++
++class ApplyPlanText(PlanText):
++    expected_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
++
++
++class TemplateRequest(Model):
++    run_id: str
++    violation_ids: list[str] = Field(min_length=1, max_length=1000)
++    rationale: str
++    reviewers: list[str]
++    expires_on: date | None = None
++    valid_revision: str | None = None
++
++
++class ContextComparison(Model):
++    before: ContextManifest
++    after: ContextManifest
++
++
++def register_routes(app, service, principal):
++    @app.post("/api/review-plans/template")
++    def template(body: TemplateRequest, actor: Principal = Depends(principal)):
++        plan = proposal_template(service, actor, **body.model_dump())
++        return {"yaml": yaml.safe_dump(plan.model_dump(mode="json"), sort_keys=False, allow_unicode=True)}
++
++    @app.post("/api/review-plans/preview")
++    def preview(body: PlanText, actor: Principal = Depends(principal)):
++        return preview_plan(service, actor, ReviewPlan.model_validate(load_yaml(body.yaml)))
++
++    @app.post("/api/review-plans/apply")
++    def apply(body: ApplyPlanText, actor: Principal = Depends(principal)):
++        return apply_plan(service, actor, ReviewPlan.model_validate(load_yaml(body.yaml)), body.expected_digest)
++
++    @app.post("/api/contexts/compare")
++    def context_comparison(body: ContextComparison, actor: Principal = Depends(principal)):
++        service.project(actor, body.before.scope.project)
++        service.project(actor, body.after.scope.project)
++        return compare_context(body.before, body.after)
+diff --git a/src/openwaiver/identity.py b/src/openwaiver/identity.py
+index 98ec102..49b7321 100644
+--- a/src/openwaiver/identity.py
++++ b/src/openwaiver/identity.py
+@@ -111,8 +111,8 @@ def similarity(old: Violation, new: Violation, policy: Policy) -> tuple[float, l
+         ay = [p[1] for p in a.points]
+         bx = [p[0] for p in b.points]
+         by = [p[1] for p in b.points]
+-        distance = math.hypot((max(ax) + min(ax) - max(bx) - min(bx)) / 2,
+-                              (max(ay) + min(ay) - max(by) - min(by)) / 2)
++        distance = math.hypot((max(ax) / 2 + min(ax) / 2) - (max(bx) / 2 + min(bx) / 2),
++                              (max(ay) / 2 + min(ay) / 2) - (max(by) / 2 + min(by) / 2))
+         if distance > policy.geometry_movement_limit:
+             return 0.0, []
+         if all(geometry_identity(x, True) == geometry_identity(y, True)
+diff --git a/src/openwaiver/interchange.py b/src/openwaiver/interchange.py
+index 8adff5c..023c146 100644
+--- a/src/openwaiver/interchange.py
++++ b/src/openwaiver/interchange.py
+@@ -85,6 +85,7 @@ def import_yaml_proposal(service, actor: Principal, text: str) -> Waiver:
+     """Never trust approval/status/evidence bytes supplied in an editable YAML record."""
+     service.role(actor, "contributor", "reviewer", "admin")
+     old = Waiver.model_validate(load_yaml(text))
++    service.project(actor, old.scope.project)
+     data = old.model_dump()
+     data.update(id=uid("wvr"), version=1, creator=actor.name, owner=actor.name,
+                 status="proposed", approvals=[], evidence=[], created_at=utcnow(), updated_at=utcnow())
+diff --git a/src/openwaiver/models.py b/src/openwaiver/models.py
+index f6b3fb6..66e00c1 100644
+--- a/src/openwaiver/models.py
++++ b/src/openwaiver/models.py
+@@ -230,6 +230,20 @@ class Policy(Model):
+ class Principal(Model):
+     name: str = Field(min_length=1)
+     role: Literal["viewer", "contributor", "reviewer", "admin"]
++    # None is explicitly workspace-wide, including legacy tokens. [] grants nothing.
++    projects: list[str] | None = Field(default=None, max_length=1000)
++
++    @field_validator("projects")
++    @classmethod
++    def project_grants(cls, value):
++        if value is not None:
++            if len(value) != len(set(value)):
++                raise ValueError("duplicate project grant")
++            for project in value:
++                if (not project.strip() or project != project.strip() or len(project) > 200
++                        or any(ord(c) < 32 for c in project)):
++                    raise ValueError("invalid project grant")
++        return value
+ 
+ 
+ class Snapshot(Model):
