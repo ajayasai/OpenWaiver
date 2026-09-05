@@ -1,0 +1,401 @@
+diff --git a/scripts/browser_smoke.py b/scripts/browser_smoke.py
+index 432548d..b8cc7ba 100644
+--- a/scripts/browser_smoke.py
++++ b/scripts/browser_smoke.py
+@@ -131,6 +131,24 @@ def main():
+                     page.locator('[data-view="overview"]').click()
+                     expect(page.locator('.metric-value').nth(1)).to_have_text('3')
+                     checks.append('browser end-to-end propose, attach, submit, independent approve and effective recalculation')
++                    # New review-plan UI: explicit selection, preview, atomic proposal (no approval).
++                    login('engineer')
++                    page.locator('[data-view="plans"]').click()
++                    page.locator('#plan-ids').fill('finding-9')
++                    page.locator('#plan-reviewers').fill('reviewer')
++                    page.locator('#plan-rationale').fill('Synthetic reviewed plan for a bounded macro pin exception.')
++                    page.locator('#generate-plan').click()
++                    expect(page.locator('#plan-yaml')).to_have_value(__import__('re').compile('expected_audit_head'))
++                    page.locator('#preview-plan').click()
++                    expect(page.locator('#apply-plan')).to_be_enabled()
++                    expect(page.locator('#plan-result')).to_contain_text('"approvals_granted": 0')
++                    page.screenshot(path=str(args.output/'review-plan.png'), full_page=True)
++                    page.locator('#apply-plan').click()
++                    expect(page.locator('#plan-result')).to_contain_text('"applied": true')
++                    expect(page.locator('#apply-plan')).to_be_disabled()
++                    page.locator('[data-view="waivers"]').click()
++                    expect(page.locator('#waivers-view tr').filter(has_text='LVS.PIN')).to_contain_text('proposed')
++                    checks.append('review-plan browser template, preview, atomic apply and zero granted approvals')
+                     # Confirm bearer storage isn't written into web storage.
+                     assert page.evaluate('localStorage.length')==0
+                     assert page.evaluate('sessionStorage.length')==0
+diff --git a/scripts/make_preview.py b/scripts/make_preview.py
+index 5c83a25..f16b026 100644
+--- a/scripts/make_preview.py
++++ b/scripts/make_preview.py
+@@ -43,9 +43,10 @@ def make(output: Path) -> None:
+         html = (static/'index.html').read_text()
+         html = html.replace('<link rel="stylesheet" href="/static/style.css">', '<style>'+ (static/'style.css').read_text() +'</style>')
+         html = html.replace('<script src="/static/app.js" defer></script>','')
++        html = html.replace('<script src="/static/plans.js" defer></script>','')
+         # Prevent data containing a closing script tag from escaping the JSON script assignment.
+         payload = json.dumps(data, ensure_ascii=True).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
+-        html = html.replace('</body>', '<script>window.OPENWAIVER_PREVIEW='+payload+';</script>\n<script>'+ (static/'app.js').read_text() +'</script>\n</body>')
++        html = html.replace('</body>', '<script>window.OPENWAIVER_PREVIEW='+payload+';</script>\n<script>'+ (static/'app.js').read_text() +'</script>\n<script>'+ (static/'plans.js').read_text() +'</script>\n</body>')
+         output.parent.mkdir(parents=True, exist_ok=True)
+         output.write_text(html, encoding='utf-8')
+         print(json.dumps({'preview':str(output), 'bytes':output.stat().st_size, 'synthetic_only':True}))
+diff --git a/scripts/native_verilator.py b/scripts/native_verilator.py
+new file mode 100644
+index 0000000..bfcb014
+--- /dev/null
++++ b/scripts/native_verilator.py
+@@ -0,0 +1,77 @@
++#!/usr/bin/env python3
++"""Execute a narrow, real Verilator importer/exporter round-trip on synthetic RTL.
++
++This validates only the installed executable and fixture, not all Verilator versions
++or any proprietary adapter. A native control file remains a lossy derivative.
++"""
++from __future__ import annotations
++
++import json
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / "src"))
++from openwaiver.exporters import export_report
++from openwaiver.importers import parse_report
++from openwaiver.models import Principal, Scope
++from openwaiver.service import Service
++from openwaiver.store import Store
++
++
++def main():
++    executable = shutil.which("verilator")
++    if not executable:
++        raise RuntimeError("Verilator is required; this conformance check must not be silently skipped")
++    version = subprocess.check_output([executable, "--version"], text=True).strip()
++    with tempfile.TemporaryDirectory(prefix="openwaiver-native-") as directory:
++        root = Path(directory)
++        source = root / "top.sv"
++        source.write_text("module top(output wire y);\n  wire intentionally_unused_a;\n  wire intentionally_unused_b;\n  assign y = 1'b0;\nendmodule\n")
++        def execute(extra=()):
++            proc = subprocess.run([executable, "--lint-only", "--Wall", "-Wno-fatal", "--top-module", "top", *extra, "top.sv"],
++                                  cwd=root, text=True, capture_output=True, timeout=60)
++            if proc.returncode:
++                raise AssertionError(f"native run failed: {proc.stdout}\n{proc.stderr}")
++            return proc.stdout + proc.stderr
++        baseline = execute()
++        service = Service(Store(root / "workspace.sqlite3"))
++        owner = Principal(name="engineer", role="contributor")
++        reviewer = Principal(name="reviewer", role="reviewer")
++        scope = Scope(project="synthetic-conformance", stream="lint", tool="verilator")
++        run = service.import_run(owner, content=baseline, format="verilator", scope=scope,
++            revision="fixture-A", complete=True, checked_categories=["lint"], tool_version=version, source_root=root)
++        assert len(run.violations) == 2, baseline
++        target = next(v for v in run.violations if v.line == 2)
++        w = service.propose(owner, run_id=run.id, violation_id=target.id,
++            rationale="Synthetic fixture exception bounded to this exact source revision.",
++            owner=owner.name, reviewers=[reviewer.name], valid_revision=run.revision)
++        w = service.attach(owner, w.id, w.version, "fixture-evidence.txt", b"Synthetic conformance evidence only.")
++        w = service.submit(owner, w.id, w.version)
++        service.review(reviewer, w.id, w.version, "approve", "Independent synthetic fixture approval.")
++        assessment = service.assessment(run.id)
++        controls = export_report(assessment, "verilator", acknowledge_lossy=True)
++        (root / "waivers.vlt").write_text(controls)
++        filtered = parse_report(execute(["waivers.vlt"]), "verilator")
++        assert len(filtered) == 1 and filtered[0].line == 3, "native export suppressed the wrong occurrence"
++        # A new source revision never inherits a revision-bound native waiver in our ledger.
++        source.write_text(source.read_text() + "// changed design revision\n")
++        changed = service.import_run(owner, content=execute(), format="verilator", scope=scope,
++            revision="fixture-B", complete=True, checked_categories=["lint"], tool_version=version, source_root=root)
++        changed_result = service.assessment(changed.id)
++        assert changed_result["counts"].get("waived", 0) == 0 and not changed_result["gate_pass"]
++    result = {"tool_version": version, "passed": True, "synthetic_only": True,
++              "checks": ["native unfiltered diagnostics imported", "approved derivative accepted by native executable",
++                         "unapproved sibling diagnostic remains", "changed revision blocked"],
++              "qualification_scope": "Only this executable version and synthetic fixture; not vendor-wide qualification."}
++    output = ROOT / "validation-results" / "native-verilator.json"
++    output.parent.mkdir(exist_ok=True)
++    output.write_text(json.dumps(result, indent=2) + "\n")
++    print(json.dumps(result, indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/openwaiver/__init__.py b/src/openwaiver/__init__.py
+index f695d55..c664a12 100644
+--- a/src/openwaiver/__init__.py
++++ b/src/openwaiver/__init__.py
+@@ -1,2 +1,2 @@
+ """OpenWaiver: cross-tool waiver lifecycle management."""
+-__version__ = "0.1.0"
++__version__ = "0.2.0"
+diff --git a/src/openwaiver/access.py b/src/openwaiver/access.py
+new file mode 100644
+index 0000000..a8a8cd1
+--- /dev/null
++++ b/src/openwaiver/access.py
+@@ -0,0 +1,73 @@
++"""Server-owned project grants and reloadable, expiring token registries.
++
++Legacy tokens without projects remain workspace-wide for compatibility. CLI and
++DB filesystem access are trusted operator interfaces, not authentication boundaries.
++"""
++from __future__ import annotations
++
++from datetime import datetime
++from pathlib import Path
++
++from pydantic import Field, model_validator
++
++from .errors import Forbidden, OpenWaiverError
++from .importers import strict_json
++from .models import Model, Principal, utcnow
++
++
++class TokenRecord(Model):
++    name: str
++    role: str
++    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
++    projects: list[str] | None = None
++    expires_at: datetime | None = None
++    revoked: bool = False
++
++    @model_validator(mode="after")
++    def validate_identity(self):
++        Principal(name=self.name, role=self.role, projects=self.projects)
++        if self.expires_at and self.expires_at.tzinfo is None:
++            raise ValueError("token expiry requires a timezone")
++        return self
++
++    def active(self):
++        return not self.revoked and (self.expires_at is None or utcnow() < self.expires_at)
++
++
++def validate_records(records: list[dict]) -> list[TokenRecord]:
++    if not records or len(records) > 10000:
++        raise OpenWaiverError("authentication registry needs 1..10000 records")
++    result = [TokenRecord.model_validate(x) for x in records]
++    if len({x.sha256 for x in result}) != len(result):
++        raise OpenWaiverError("duplicate token digest")
++    return result
++
++
++def token_records(path: Path) -> list[dict]:
++    if path.is_symlink():
++        raise OpenWaiverError("symbolic-link token registry rejected")
++    with path.open("rb") as stream:
++        raw = stream.read(1024 * 1024 + 1)
++    if len(raw) > 1024 * 1024:
++        raise OpenWaiverError("authentication registry exceeds 1 MiB")
++    doc = strict_json(raw.decode("utf-8"))
++    if not isinstance(doc, dict) or set(doc) != {"tokens"}:
++        raise OpenWaiverError("registry must contain only a tokens array")
++    return [x.model_dump(mode="json") for x in validate_records(doc["tokens"])]
++
++
++def workspace_only(actor: Principal):
++    if actor.projects is not None:
++        raise Forbidden("this operation exposes the shared workspace ledger; an unrestricted identity is required")
++
++
++def visible_events(service, conn, actor: Principal):
++    events = service.store.events(conn)
++    if actor.projects is None:
++        return events
++    permitted = set()
++    for table in ("runs", "waivers", "snapshots"):
++        for item in service.store.all(conn, table):
++            if service.visible(actor, item):
++                permitted.add((table, item.id))
++    return [e for e in events if (e["entity"], e["id"]) in permitted]
+diff --git a/src/openwaiver/api.py b/src/openwaiver/api.py
+index fc201c0..1249c69 100644
+--- a/src/openwaiver/api.py
++++ b/src/openwaiver/api.py
+@@ -17,6 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
+ from pydantic import Field
+ 
+ from . import __version__
++from .access import token_records, validate_records, visible_events, workspace_only
+ from .engine import compare_snapshots
+ from .errors import Conflict, Forbidden, IntegrityError, NotFound, OpenWaiverError
+ from .exporters import export_report
+@@ -38,6 +39,7 @@ class ImportRequest(Model):
+     tool_version: str = ""
+     rule_deck_digest: str = ""
+     configuration_digest: str = ""
++    context_manifest: dict | None = None
+ 
+ 
+ class Proposal(Model):
+@@ -115,29 +117,16 @@ class BodyLimit:
+         await self.app(scope, bounded_receive, send)
+ 
+ 
+-def token_records(path: Path) -> list[dict]:
+-    doc = strict_json(path.read_text(encoding="utf-8"))
+-    records = doc.get("tokens", [])
+-    if not records:
+-        raise OpenWaiverError("authentication registry must contain at least one token")
+-    seen = set()
+-    for record in records:
+-        Principal(name=record["name"], role=record["role"])
+-        sha = record["sha256"]
+-        if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha) or sha in seen:
+-            raise OpenWaiverError("invalid or duplicate token digest")
+-        seen.add(sha)
+-    return records
+-
+-
+-def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None) -> FastAPI:
++def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None, *, auth_file: str | Path | None = None) -> FastAPI:
+     if auth is None:
+-        registry = os.environ.get("OPENWAIVER_AUTH_FILE")
++        registry = auth_file or os.environ.get("OPENWAIVER_AUTH_FILE")
+         if not registry:
+             raise OpenWaiverError("OPENWAIVER_AUTH_FILE is required; use openwaiver auth-create")
+-        auth = token_records(Path(registry))
++        auth_file = Path(registry)
++        auth = token_records(auth_file)
+     if not auth:
+         raise OpenWaiverError("refusing to start without authentication")
++    validate_records(auth)
+     service = Service(Store(db_path or os.environ.get("OPENWAIVER_DB", "workspace/openwaiver.sqlite3")))
+     app = FastAPI(title="OpenWaiver", version=__version__, description="Cross-tool waiver lifecycle API")
+     app.state.service = service
+@@ -151,12 +140,16 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+             raise HTTPException(401, "bearer token required", headers={"WWW-Authenticate": "Bearer"})
+         candidate = hashlib.sha256(credentials.credentials.encode()).hexdigest()
+         match = None
+-        for record in auth:
+-            if hmac.compare_digest(candidate, record["sha256"]):
++        try:
++            records = validate_records(token_records(Path(auth_file)) if auth_file else auth)
++        except (ValueError, OSError, KeyError, TypeError):
++            raise HTTPException(503, "authentication registry unavailable") from None
++        for record in records:
++            if hmac.compare_digest(candidate, record.sha256) and record.active():
+                 match = record
+         if match is None:
+             raise HTTPException(401, "invalid token", headers={"WWW-Authenticate": "Bearer"})
+-        return Principal(name=match["name"], role=match["role"])
++        return Principal(name=match.name, role=match.role, projects=match.projects)
+ 
+     @app.middleware("http")
+     async def security_headers(request: Request, call_next):
+@@ -191,6 +184,7 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+ 
+     @app.post("/api/release-gate")
+     def release_gate(body: ReleaseManifest, actor: Principal = Depends(principal)):
++        service.project(actor, body.project)
+         return gate_release(service.store, body)
+ 
+     @app.get("/api/me")
+@@ -201,7 +195,7 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+     def runs(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000),
+              actor: Principal = Depends(principal)):
+         with service.store.transaction(write=False) as conn:
+-            items = list(reversed(service.store.all(conn, "runs")))
++            items = [x for x in reversed(service.store.all(conn, "runs")) if service.visible(actor, x)]
+             return {"total": len(items), "items": [{**x.model_dump(mode="json", exclude={"violations"}),
+                      "violation_count": len(x.violations)} for x in items[offset:offset + limit]]}
+ 
+@@ -212,7 +206,7 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+     @app.get("/api/runs/{id}/assessment")
+     def assessment(id: str, offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000),
+                    q: str = "", status: str = "", category: str = "", actor: Principal = Depends(principal)):
+-        result = service.assessment(id)
++        result = service.assessment(id, actor=actor)
+         rows = result["violations"]
+         if status:
+             rows = [r for r in rows if r["status"] == status]
+@@ -227,18 +221,18 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+     def waivers(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000),
+                 actor: Principal = Depends(principal)):
+         with service.store.transaction(write=False) as conn:
+-            items = list(reversed(service.store.all(conn, "waivers")))
++            items = [x for x in reversed(service.store.all(conn, "waivers")) if service.visible(actor, x)]
+             return {"items": items[offset:offset + limit], "total": len(items)}
+ 
+     @app.get("/api/waivers/{id}")
+     def waiver(id: str, actor: Principal = Depends(principal)):
+         with service.store.transaction(write=False) as conn:
+-            return service.store.get(conn, "waivers", id)
++            return service.read(conn, "waivers", id, actor)
+ 
+     @app.get("/api/waivers/{id}/history")
+     def history(id: str, actor: Principal = Depends(principal)):
+         with service.store.transaction(write=False) as conn:
+-            service.store.get(conn, "waivers", id)
++            service.read(conn, "waivers", id, actor)
+             return [e for e in service.store.events(conn) if e["entity"] == "waivers" and e["id"] == id]
+ 
+     @app.post("/api/waivers", status_code=201)
+@@ -277,6 +271,11 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+     def download_evidence(sha: str, actor: Principal = Depends(principal)):
+         with service.store.transaction(write=False) as conn:
+             service.store.verify(conn)
++            if actor.projects is not None and not any(
++                service.visible(actor, w) and any(e.sha256 == sha for e in w.evidence)
++                for w in service.store.all(conn, "waivers")
++            ):
++                raise NotFound("evidence not found")
+             row = conn.execute("SELECT data FROM evidence WHERE sha256=?", (sha,)).fetchone()
+             if row is None:
+                 raise NotFound("evidence not found")
+@@ -287,7 +286,9 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+     def audit(limit: int = Query(50, ge=1, le=500), actor: Principal = Depends(principal)):
+         with service.store.transaction(write=False) as conn:
+             verified = service.store.verify(conn)
+-            events = service.store.events(conn)[-limit:][::-1]
++            events = visible_events(service, conn, actor)[-limit:][::-1]
++            if actor.projects is not None:
++                verified = {"valid": True, "view": "project-filtered", "head": None, "externally_anchored": False}
+             return {**verified, "events": [{k: v for k, v in x.items() if k != "record"} for x in events]}
+ 
+     @app.get("/api/policy")
+@@ -304,7 +305,7 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+         with service.store.transaction(write=False) as conn:
+             return [{"id": s.id, "name": s.name, "created_at": s.created_at, "revision": s.run.revision,
+                      "gate_pass": s.assessment["gate_pass"], "run_id": s.run.id}
+-                    for s in reversed(service.store.all(conn, "snapshots"))]
++                    for s in reversed(service.store.all(conn, "snapshots")) if service.visible(actor, s)]
+ 
+     @app.post("/api/snapshots", status_code=201)
+     def freeze(body: Freeze, actor: Principal = Depends(principal)):
+@@ -312,6 +313,7 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+ 
+     @app.get("/api/snapshots/{id}/bundle")
+     def get_bundle(id: str, actor: Principal = Depends(principal)):
++        workspace_only(actor)
+         return Response(bundle(service, id), media_type="application/zip",
+                         headers={"Content-Disposition": 'attachment; filename="openwaiver-evidence.zip"'})
+ 
+@@ -319,16 +321,19 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
+     def compare(before: str, after: str, actor: Principal = Depends(principal)):
+         with service.store.transaction(write=False) as conn:
+             service.store.verify(conn)
+-            return compare_snapshots(service.store.get(conn, "snapshots", before),
+-                                     service.store.get(conn, "snapshots", after))
++            return compare_snapshots(service.read(conn, "snapshots", before, actor),
++                                     service.read(conn, "snapshots", after, actor))
+ 
+     @app.get("/api/runs/{id}/export/{format}")
+     def export(id: str, format: str, acknowledge_lossy: bool = False, actor: Principal = Depends(principal)):
+-        data = export_report(service.assessment(id), format, acknowledge_lossy=acknowledge_lossy)
++        data = export_report(service.assessment(id, actor=actor), format, acknowledge_lossy=acknowledge_lossy)
+         extensions = {"json": "json", "sarif": "sarif", "html": "html", "junit": "xml", "verilator": "vlt"}
+         return Response(data, media_type="application/octet-stream", headers={
+             "Content-Disposition": f'attachment; filename="assessment.{extensions[format]}"'})
+ 
++    from .extensions import register_routes
++    register_routes(app, service, principal)
++
+     static = Path(__file__).parent / "static"
+     app.mount("/static", StaticFiles(directory=static), name="static")
+ 
