@@ -1,0 +1,452 @@
+diff --git a/tests/test_attestation.py b/tests/test_attestation.py
+new file mode 100644
+index 0000000..52348dd
+--- /dev/null
++++ b/tests/test_attestation.py
+@@ -0,0 +1,154 @@
++from datetime import timedelta
++import hashlib
++import io
++import json
++import zipfile
++
++from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
++import pytest
++
++from openwaiver.attestation import (Attestation, checkpoint, generate_keypair, load_private,
++    load_public, sign_file, verify_checkpoint, verify_file)
++from openwaiver.evidence import verify_evidence
++from openwaiver.errors import IntegrityError
++from openwaiver.identity import canonical
++from openwaiver.interchange import bundle, verify_bundle
++from openwaiver.models import utcnow
++
++
++def test_signature_requires_external_matching_key_and_subject():
++    key = Ed25519PrivateKey.generate()
++    sealed = sign_file(b"evidence", key, "chip/release-A")
++    assert verify_file(b"evidence", sealed, key.public_key(), "chip/release-A")["signature_verified"]
++    with pytest.raises(IntegrityError):
++        verify_file(b"evidence", sealed, Ed25519PrivateKey.generate().public_key(), "chip/release-A")
++    with pytest.raises(IntegrityError):
++        verify_file(b"evidence", sealed, key.public_key(), "chip/release-B")
++    with pytest.raises(IntegrityError):
++        verify_file(b"modified", sealed, key.public_key(), "chip/release-A")
++
++
++@pytest.mark.parametrize("mutation", ["signature", "digest", "key_id", "type"])
++def test_modified_envelope_rejected(mutation):
++    key = Ed25519PrivateKey.generate()
++    envelope = sign_file(b"evidence", key, "release")
++    doc = envelope.model_dump(mode="json")
++    if mutation == "signature":
++        doc["signature"] = "0" * 128
++    elif mutation == "digest":
++        doc["claim"]["sha256"] = "0" * 64
++    elif mutation == "key_id":
++        doc["key_id"] = "0" * 64
++    else:
++        doc["claim"].update(kind="audit-checkpoint", sequence=1)
++    with pytest.raises(IntegrityError):
++        verify_file(b"evidence", Attestation.model_validate(doc), key.public_key(), "release")
++
++
++def test_expiry_and_future_issuance_are_enforced():
++    key = Ed25519PrivateKey.generate()
++    envelope = sign_file(b"a", key, "subject", hours=1)
++    with pytest.raises(IntegrityError):
++        verify_file(b"a", envelope, key.public_key(), "subject", now=envelope.claim.expires_at)
++    with pytest.raises(IntegrityError):
++        verify_file(b"a", envelope, key.public_key(), "subject", now=envelope.claim.issued_at - timedelta(seconds=1))
++
++
++def test_checkpoint_accepts_append_but_detects_replacement(service, make_run):
++    key = Ed25519PrivateKey.generate()
++    make_run()
++    sealed = checkpoint(service.store, key, "workspace-A")
++    make_run(revision="later")
++    verified = verify_checkpoint(service.store, sealed, key.public_key(), "workspace-A")
++    assert verified["events"] > verified["checkpoint_sequence"]
++    with pytest.raises(IntegrityError):
++        verify_checkpoint(service.store, sealed, key.public_key(), "workspace-A", minimum_sequence=sealed.claim.sequence + 1)
++    with pytest.raises(IntegrityError):
++        verify_checkpoint(service.store, sealed, key.public_key(), "workspace-A", now=sealed.claim.expires_at)
++    with service.store.transaction() as conn:
++        conn.execute("DELETE FROM audit WHERE seq=?", (sealed.claim.sequence,))
++    with pytest.raises(IntegrityError):
++        verify_checkpoint(service.store, sealed, key.public_key(), "workspace-A")
++
++
++def test_checkpoint_from_other_workspace_rejected(service, tmp_path):
++    from openwaiver.store import Store
++    key = Ed25519PrivateKey.generate()
++    sealed = checkpoint(service.store, key, "subject")
++    other = Store(tmp_path / "different.sqlite3")
++    with pytest.raises(IntegrityError):
++        verify_checkpoint(other, sealed, key.public_key(), "subject")
++
++
++def test_key_files_are_create_only_and_private_permissions_enforced(tmp_path):
++    private, public = tmp_path / "signing.pem", tmp_path / "verify.pem"
++    generate_keypair(private, public)
++    assert private.stat().st_mode & 0o777 == 0o600
++    key = load_private(private)
++    envelope = sign_file(b"x", key, "release")
++    assert verify_file(b"x", envelope, load_public(public), "release")["valid"]
++    with pytest.raises(ValueError):
++        generate_keypair(private, public)
++    private.chmod(0o644)
++    with pytest.raises(ValueError):
++        load_private(private)
++
++
++def test_unknown_algorithm_cannot_be_selected():
++    key = Ed25519PrivateKey.generate()
++    doc = sign_file(b"x", key, "s").model_dump(mode="json")
++    doc["algorithm"] = "none"
++    with pytest.raises(ValueError):
++        Attestation.model_validate(doc)
++
++
++def test_semantic_bundle_verification_replays_historical_policy(service, actors, make_run, make_waiver):
++    run = make_run()
++    waiver = make_waiver(run)
++    snapshot = service.freeze(actors["bob"], run.id, "reviewed snapshot")
++    service.revoke(actors["alice"], waiver.id, waiver.version, "later revocation")
++    data = bundle(service, snapshot.id)
++    result = verify_evidence(data)
++    assert result["assessment_replayed"] and result["audit_verified"]
++    assert not result["signature_verified"] and not result["externally_anchored"]
++    key = Ed25519PrivateKey.generate()
++    sealed = sign_file(data, key, "chip/release")
++    assert verify_file(data, sealed, key.public_key(), "chip/release")["valid"]
++
++
++def repackage(data, filename, value):
++    with zipfile.ZipFile(io.BytesIO(data)) as z:
++        files = {name: z.read(name) for name in z.namelist()}
++    files[filename] = value
++    manifest = json.loads(files["manifest.json"])
++    manifest["files"][filename] = hashlib.sha256(value).hexdigest()
++    files["manifest.json"] = canonical(manifest).encode()
++    output = io.BytesIO()
++    with zipfile.ZipFile(output, "w") as z:
++        for name, raw in files.items():
++            z.writestr(name, raw)
++    return output.getvalue()
++
++
++@pytest.mark.parametrize("target", ["snapshot", "audit", "waiver"])
++def test_rehashed_but_inconsistent_bundle_is_rejected(service, actors, make_run, make_waiver, target):
++    run = make_run()
++    waiver = make_waiver(run)
++    snapshot = service.freeze(actors["bob"], run.id, "snapshot")
++    data = bundle(service, snapshot.id)
++    with zipfile.ZipFile(io.BytesIO(data)) as z:
++        if target == "snapshot":
++            name = "snapshot.json"
++            doc = json.loads(z.read(name))
++            doc["assessment"]["gate_pass"] = False
++            value = canonical(doc).encode()
++        elif target == "audit":
++            name = "audit.jsonl"
++            value = b"\n".join(z.read(name).splitlines()[1:]) + b"\n"
++        else:
++            name = f"waivers/{waiver.id}.yaml"
++            value = z.read(name).replace(b"alice", b"mallory")
++    forged = repackage(data, name, value)
++    assert verify_bundle(forged)["valid"]  # All file checksums were regenerated.
++    with pytest.raises(IntegrityError):
++        verify_evidence(forged)  # Audit binding / historical content still catches it.
+diff --git a/tests/test_candidate_index.py b/tests/test_candidate_index.py
+new file mode 100644
+index 0000000..1a61204
+--- /dev/null
++++ b/tests/test_candidate_index.py
+@@ -0,0 +1,62 @@
++from random import Random
++import pytest
++
++from openwaiver.candidate_index import CandidateIndex
++from openwaiver.engine import assess
++from openwaiver.identity import fingerprint, similarity
++from openwaiver.models import Geometry, Policy, utcnow
++
++
++@pytest.mark.parametrize("seed", range(10))
++def test_index_retrieves_every_exhaustive_similarity_match(seed, make_run, make_waiver, record):
++    w = make_waiver(make_run())
++    rng = Random(seed)
++    waivers = []
++    for i in range(100):
++        x, y = rng.uniform(-500, 500), rng.uniform(-500, 500)
++        target = w.target.model_copy(update={"id": str(i), "path": rng.choice(["a.sv", "b.sv", ""]),
++            "line": rng.randint(1, 1000), "hierarchy": rng.choice(["top/a", "top/b"]),
++            "object_id": rng.choice(["", "object-x", "object-y"]),
++            "geometries": [Geometry(kind="box", points=[(x, y), (x + 1, y + 1)])]})
++        waivers.append(w.model_copy(update={"id": str(i), "target": target, "fingerprint": fingerprint(target)}))
++    policy = Policy(candidate_limit=1000)
++    index = CandidateIndex(waivers, policy)
++    for _ in range(20):
++        v = rng.choice(waivers).target.model_copy(update={"line": rng.randint(1, 1000)})
++        pool, overflow = index.query(v)
++        assert not overflow
++        expected = {a.id for a in waivers if similarity(a.target, v, policy)[0] >= .7}
++        assert expected <= {a.id for a in pool}
++
++
++def test_sparse_same_rule_moved_sources_do_not_hit_global_budget(make_run, make_waiver):
++    run = make_run()
++    w = make_waiver(run)
++    waivers, violations = [], []
++    for i in range(2000):
++        v = w.target.model_copy(update={"id": str(i), "line": i * 300 + 1})
++        waivers.append(w.model_copy(update={"id": str(i), "target": v, "fingerprint": fingerprint(v)}))
++        violations.append(v.model_copy(update={"line": v.line + 1}))
++    result = assess(run.model_copy(update={"violations": violations}), waivers, Policy(), utcnow().date())
++    assert result["counts"] == {"needs_review": 2000}
++    assert not result["gate_pass"]  # Retrieval improvements never grant approval.
++
++
++def test_dense_geometry_remains_ambiguous(make_run, make_waiver):
++    run = make_run()
++    w = make_waiver(run)
++    a = w.target.model_copy(update={"path": "", "line": None, "geometries": [Geometry(kind="point", points=[(0, 0)])]})
++    waivers = [w.model_copy(update={"id": str(i), "target": a, "fingerprint": fingerprint(a)}) for i in range(10)]
++    moved = a.model_copy(update={"geometries": [Geometry(kind="point", points=[(1, 0)])]})
++    result = assess(run.model_copy(update={"violations": [moved]}), waivers, Policy(candidate_limit=2), utcnow().date())
++    assert result["counts"] == {"ambiguous": 1}
++    assert all(w["status"] == "not_observed" for w in result["waivers"])
++
++
++def test_extreme_finite_geometry_does_not_overflow_index(make_run, make_waiver):
++    w = make_waiver(make_run())
++    target = w.target.model_copy(update={"geometries": [Geometry(kind="point", points=[(1e308, -1e308)])]})
++    w = w.model_copy(update={"target": target})
++    index = CandidateIndex([w], Policy(geometry_movement_limit=1e-300))
++    candidates, overflow = index.query(target)
++    assert not overflow and candidates[0].id == w.id
+diff --git a/tests/test_cli_extensions.py b/tests/test_cli_extensions.py
+new file mode 100644
+index 0000000..fe0c231
+--- /dev/null
++++ b/tests/test_cli_extensions.py
+@@ -0,0 +1,81 @@
++import json
++
++import pytest
++import yaml
++
++from openwaiver.cli import main
++from openwaiver.interchange import bundle
++
++
++def test_cli_plan_round_trip(service, make_run, tmp_path, capsys):
++    run = make_run()
++    prefix = ['--db', str(service.store.path), '--actor', 'alice']
++    plan, preview, result = [tmp_path / n for n in ('plan.yaml', 'preview.json', 'result.json')]
++    assert main(prefix + ['plan-template', run.id, '--violation', 'v1', '--reviewers', 'bob',
++        '--rationale', 'Explicitly reviewed engineering exception for this source revision.',
++        '--valid-revision', run.revision, '--output', str(plan)]) == 0
++    assert main(prefix + ['plan-preview', str(plan), '--output', str(preview)]) == 0
++    digest = json.loads(preview.read_text())['preview_digest']
++    assert main(prefix + ['plan-apply', str(plan), '--expected-digest', digest, '--output', str(result)]) == 0
++    assert json.loads(result.read_text())['results'][0]['status'] == 'proposed'
++    assert main(prefix + ['plan-apply', str(plan), '--expected-digest', digest]) == 2
++    assert 'changed since' in capsys.readouterr().err
++
++
++def test_cli_context_build_and_compare(tmp_path, capsys):
++    (tmp_path / 'top.sv').write_text('module top; endmodule\n')
++    specification = {'scope': {'project': 'p', 'tool': 't', 'stream': 's'}, 'revision': 'A',
++        'nodes': {'top.sv': {}}, 'targets': {'v': ['top.sv']}}
++    spec = tmp_path / 'spec.yaml'
++    spec.write_text(yaml.safe_dump(specification))
++    before, after, result = [tmp_path / n for n in ('a.json', 'b.json', 'diff.json')]
++    args = ['context-build', str(spec), '--root', str(tmp_path), '--output']
++    assert main(args + [str(before)]) == 0
++    (tmp_path / 'top.sv').write_text('module top; wire change; endmodule\n')
++    assert main(args + [str(after)]) == 0
++    assert main(['context-compare', str(before), str(after), '--output', str(result)]) == 0
++    assert json.loads(result.read_text())['targets_impacted'] == ['v']
++    assert main(args + [str(before)]) == 2  # Never silently overwrite evidence.
++
++
++def test_cli_offline_signature_checkpoint_and_semantic_bundle(service, actors, make_run, make_waiver, tmp_path, capsys):
++    run = make_run()
++    make_waiver(run)
++    snap = service.freeze(actors['bob'], run.id, 'candidate', require_clean=True)
++    data = bundle(service, snap.id)
++    archive = tmp_path / 'bundle.zip'
++    archive.write_bytes(data)
++    private, public, signature, checkpoint = [tmp_path / n for n in ('signing.key', 'trusted.pub', 'signature.json', 'checkpoint.json')]
++    assert main(['keygen', '--private-key', str(private), '--public-key', str(public)]) == 0
++    assert main(['sign-file', str(archive), '--private-key', str(private), '--subject', 'project/candidate', '--output', str(signature)]) == 0
++    verify = ['verify-evidence', str(archive), '--signature', str(signature), '--public-key', str(public), '--subject', 'project/candidate']
++    capsys.readouterr()
++    assert main(verify) == 0
++    result = json.loads(capsys.readouterr().out)
++    assert result['assessment_replayed'] and result['signature_verified'] and result['externally_anchored']
++    assert main(['verify-file', str(archive), '--signature', str(signature), '--public-key', str(public), '--subject', 'other']) == 2
++    prefix = ['--db', str(service.store.path)]
++    assert main(prefix + ['checkpoint', '--private-key', str(private), '--subject', 'project/ledger', '--output', str(checkpoint)]) == 0
++    assert main(prefix + ['verify-checkpoint', '--signature', str(checkpoint), '--public-key', str(public), '--subject', 'project/ledger']) == 0
++    assert main(['verify-evidence', str(archive), '--signature', str(signature)]) == 2
++    archive.write_bytes(data + b'changed bytes')
++    assert main(['verify-file', str(archive), '--signature', str(signature), '--public-key', str(public), '--subject', 'project/candidate']) == 2
++
++
++@pytest.mark.parametrize('nodes', [None, [], 'bad', {'top.sv': []}])
++def test_cli_context_rejects_malformed_nodes_without_traceback(nodes, tmp_path, capsys):
++    spec = tmp_path / 'bad.yaml'
++    spec.write_text(yaml.safe_dump({'nodes': nodes}))
++    assert main(['context-build', str(spec), '--root', str(tmp_path), '--output', str(tmp_path / 'out')]) == 2
++    assert 'openwaiver:' in capsys.readouterr().err
++
++
++def test_cli_auth_grants_expiry_and_explicit_workspace(tmp_path):
++    path = tmp_path / 'auth.json'
++    args = ['auth-create', '--file', str(path), '--name', 'alice', '--auth-role', 'contributor']
++    assert main(args + ['--project', 'chip', '--expires-at', '2099-01-01T00:00:00+00:00']) == 0
++    assert main(args + ['--all-projects']) == 0
++    records = json.loads(path.read_text())['tokens']
++    assert records[0]['projects'] == ['chip'] and records[0]['expires_at']
++    assert records[1]['projects'] is None
++    assert main(args + ['--project', 'chip', '--expires-at', '2099-01-01T00:00:00']) == 2
+diff --git a/tests/test_context.py b/tests/test_context.py
+new file mode 100644
+index 0000000..f73926d
+--- /dev/null
++++ b/tests/test_context.py
+@@ -0,0 +1,104 @@
++from copy import deepcopy
++import hashlib
++import pytest
++
++from openwaiver.context import ContextManifest, bind_context, build_context, compare_context, safe_path
++from openwaiver.models import Scope, Violation
++
++
++@pytest.fixture
++def context_spec(tmp_path):
++    for name in ["top.sv", "defines.svh", "unrelated.sv"]:
++        (tmp_path / name).write_text("synthetic source for " + name)
++    return {"schema_version": 1, "scope": {"project": "chip", "stream": "nightly", "tool": "verilator"},
++        "revision": "rev-a", "settings": {"defines": "SYNTHESIS=1"},
++        "nodes": {"top.sv": {"dependencies": ["defines.svh"]}, "defines.svh": {}, "unrelated.sv": {}},
++        "targets": {"v1": ["top.sv"], "v2": ["unrelated.sv"]}}
++
++
++def test_content_changes_only_invalidate_dependent_targets(context_spec, tmp_path):
++    before = build_context(tmp_path, context_spec)
++    (tmp_path / "defines.svh").write_text("changed include")
++    after = build_context(tmp_path, {**context_spec, "revision": "rev-b"})
++    diff = compare_context(before, after)
++    assert diff["content_changed"] == ["defines.svh"]
++    assert diff["targets_impacted"] == ["v1"] and diff["targets_unchanged"] == ["v2"]
++
++
++def test_irrelevant_revision_and_order_do_not_change_context(context_spec, tmp_path):
++    a = build_context(tmp_path, context_spec)
++    reordered = {**context_spec, "revision": "rev-b", "nodes": dict(reversed(list(context_spec["nodes"].items())))}
++    b = build_context(tmp_path, reordered)
++    assert a.context_hashes() == b.context_hashes()
++
++
++def test_settings_or_graph_edges_invalidate_context(context_spec, tmp_path):
++    a = build_context(tmp_path, context_spec)
++    b = build_context(tmp_path, {**context_spec, "settings": {"defines": "SYNTHESIS=0"}})
++    assert compare_context(a, b)["targets_impacted"] == ["v1", "v2"]
++    changed = deepcopy(context_spec)
++    changed["nodes"]["top.sv"]["dependencies"] = []
++    c = build_context(tmp_path, changed)
++    assert compare_context(a, c)["dependencies_changed"] == ["top.sv"]
++    assert compare_context(a, c)["targets_impacted"] == ["v1"]
++
++
++@pytest.mark.parametrize("path", ["../secret", "/absolute", "a/../b", "a//b", "./a", "a\\b", "a:", "", "a\x00"])
++def test_unsafe_dependency_paths_rejected(path):
++    with pytest.raises(ValueError):
++        safe_path(path)
++
++
++def test_missing_dependency_and_cycle_rejected(context_spec, tmp_path):
++    spec = deepcopy(context_spec)
++    spec["nodes"]["top.sv"]["dependencies"] = ["absent"]
++    with pytest.raises(ValueError):
++        build_context(tmp_path, spec)
++    spec["nodes"]["top.sv"]["dependencies"] = ["defines.svh"]
++    spec["nodes"]["defines.svh"]["dependencies"] = ["top.sv"]
++    with pytest.raises(ValueError, match="cycle"):
++        build_context(tmp_path, spec)
++
++
++def test_symlink_rejected(context_spec, tmp_path):
++    (tmp_path / "top.sv").unlink()
++    (tmp_path / "top.sv").symlink_to(tmp_path / "defines.svh")
++    with pytest.raises(ValueError, match="symlink"):
++        build_context(tmp_path, context_spec)
++
++
++def test_iterative_hashing_handles_deep_graph():
++    n = 2500
++    spec = {"scope": {"project": "p", "stream": "s", "tool": "t"}, "revision": "r",
++        "nodes": {f"f{i}": {"sha256": "a" * 64, "dependencies": [f"f{i-1}"] if i else []} for i in range(n)},
++        "targets": {"v": [f"f{n-1}"]}}
++    assert len(ContextManifest.model_validate(spec).context_hashes()["v"]) == 64
++
++
++def test_import_uses_real_dependency_hash_and_stales_approval(service, actors, make_run, make_waiver, record, context_spec, tmp_path):
++    spec = {**context_spec, "targets": {"v1": ["top.sv"]}}
++    manifest = build_context(tmp_path, spec)
++    report = {**record, "context_hash": ""}
++    a = make_run([report], context_manifest=manifest.model_dump(mode="json"))
++    make_waiver(a)
++    spec["revision"] = "rev-b"
++    unchanged = build_context(tmp_path, spec)
++    b = make_run([report], revision="rev-b", context_manifest=unchanged.model_dump(mode="json"))
++    assert service.assessment(b.id)["gate_pass"]
++    (tmp_path / "defines.svh").write_text("changed transitive dependency")
++    changed = build_context(tmp_path, spec)
++    c = make_run([report], revision="rev-b", context_manifest=changed.model_dump(mode="json"))
++    assert service.assessment(c.id)["counts"] == {"stale": 1}
++
++
++def test_manifest_scope_revision_coverage_and_claim_checked(context_spec, tmp_path, record):
++    manifest = build_context(tmp_path, {**context_spec, "targets": {"v1": ["top.sv"]}})
++    violation = Violation.model_validate({**record, "context_hash": ""})
++    with pytest.raises(ValueError):
++        bind_context([violation], manifest, manifest.scope, "wrong-revision")
++    with pytest.raises(ValueError):
++        bind_context([], manifest, manifest.scope, manifest.revision)
++    with pytest.raises(ValueError):
++        bind_context([Violation.model_validate(record)], manifest, manifest.scope, manifest.revision)
++    result = bind_context([violation], manifest, manifest.scope, manifest.revision)
++    assert result[0].context_hash == manifest.context_hashes()["v1"]
+diff --git a/tests/test_native_preflight.py b/tests/test_native_preflight.py
+new file mode 100644
+index 0000000..6f48dd4
+--- /dev/null
++++ b/tests/test_native_preflight.py
+@@ -0,0 +1,21 @@
++import pytest
++from openwaiver.exporters import export_report
++from openwaiver.errors import OpenWaiverError
++
++
++def test_native_export_cannot_suppress_unapproved_same_line(service, make_run, make_waiver, record):
++    make_waiver(make_run())
++    run = make_run([record, {**record, "id": "sibling", "column": 17,
++                            "message": "A different unreviewed occurrence on the same line"}])
++    result = service.assessment(run.id)
++    assert result["counts"].get("waived") == 1
++    with pytest.raises(OpenWaiverError, match="also suppress"):
++        export_report(result, "verilator", acknowledge_lossy=True)
++
++
++def test_preflight_keeps_distinct_lines_exportable(service, make_run, make_waiver, record):
++    make_waiver(make_run())
++    run = make_run([record, {**record, "id": "sibling", "line": 101,
++                            "message": "Another occurrence on a different line"}])
++    result = export_report(service.assessment(run.id), "verilator", acknowledge_lossy=True)
++    assert "-lines 21" in result and "-lines 101" not in result
