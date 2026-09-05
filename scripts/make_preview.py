@@ -43,9 +43,10 @@ def make(output: Path) -> None:
         html = (static/'index.html').read_text()
         html = html.replace('<link rel="stylesheet" href="/static/style.css">', '<style>'+ (static/'style.css').read_text() +'</style>')
         html = html.replace('<script src="/static/app.js" defer></script>','')
+        html = html.replace('<script src="/static/plans.js" defer></script>','')
         # Prevent data containing a closing script tag from escaping the JSON script assignment.
         payload = json.dumps(data, ensure_ascii=True).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
-        html = html.replace('</body>', '<script>window.OPENWAIVER_PREVIEW='+payload+';</script>\n<script>'+ (static/'app.js').read_text() +'</script>\n</body>')
+        html = html.replace('</body>', '<script>window.OPENWAIVER_PREVIEW='+payload+';</script>\n<script>'+ (static/'app.js').read_text() +'</script>\n<script>'+ (static/'plans.js').read_text() +'</script>\n</body>')
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(html, encoding='utf-8')
         print(json.dumps({'preview':str(output), 'bytes':output.stat().st_size, 'synthetic_only':True}))

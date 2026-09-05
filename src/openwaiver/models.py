@@ -230,6 +230,20 @@ class Policy(Model):
 class Principal(Model):
     name: str = Field(min_length=1)
     role: Literal["viewer", "contributor", "reviewer", "admin"]
+    # None is explicitly workspace-wide, including legacy tokens. [] grants nothing.
+    projects: list[str] | None = Field(default=None, max_length=1000)
+
+    @field_validator("projects")
+    @classmethod
+    def project_grants(cls, value):
+        if value is not None:
+            if len(value) != len(set(value)):
+                raise ValueError("duplicate project grant")
+            for project in value:
+                if (not project.strip() or project != project.strip() or len(project) > 200
+                        or any(ord(c) < 32 for c in project)):
+                    raise ValueError("invalid project grant")
+        return value
 
 
 class Snapshot(Model):

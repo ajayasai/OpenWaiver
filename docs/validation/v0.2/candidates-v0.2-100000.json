@@ -1,0 +1,38 @@
+{
+  "workload": "same rule, hierarchy and source file; unique lines 300 apart; every finding moves +1",
+  "synthetic_only": true,
+  "version": "0.2.0",
+  "engine_sha256": "01ca158919547d1757d7f895823813f387c1a7a81eb084de6a88d2e3a5421e93",
+  "created_at": "2026-09-05T13:15:43.183796+00:00",
+  "findings": 100000,
+  "waivers": 100000,
+  "repeats": 3,
+  "seconds": [
+    4.409436421999999,
+    4.174004485000069,
+    5.133809546999828
+  ],
+  "median_seconds": 4.409436421999999,
+  "counts": {
+    "needs_review": 100000
+  },
+  "correct_unique_review_candidates": 100000,
+  "automatic_suppressions": 0,
+  "peak_process_rss_kib_linux": 1110752,
+  "python": "3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.41",
+  "candidate_limit": 256,
+  "excludes": [
+    "input generation",
+    "parsing",
+    "database and audit traversal",
+    "network",
+    "browser",
+    "EDA execution"
+  ],
+  "limitations": [
+    "Constructed sparse-source workload, not production capacity or commercial comparison.",
+    "Dense source/geometry groups may still exceed the bounded candidate budget and remain ambiguous.",
+    "Peak RSS includes data generation and output; it is not assessment-only incremental memory."
+  ]
+}

@@ -85,6 +85,7 @@ def import_yaml_proposal(service, actor: Principal, text: str) -> Waiver:
     """Never trust approval/status/evidence bytes supplied in an editable YAML record."""
     service.role(actor, "contributor", "reviewer", "admin")
     old = Waiver.model_validate(load_yaml(text))
+    service.project(actor, old.scope.project)
     data = old.model_dump()
     data.update(id=uid("wvr"), version=1, creator=actor.name, owner=actor.name,
                 status="proposed", approvals=[], evidence=[], created_at=utcnow(), updated_at=utcnow())

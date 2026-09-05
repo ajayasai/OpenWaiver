@@ -131,6 +131,24 @@ def main():
                     page.locator('[data-view="overview"]').click()
                     expect(page.locator('.metric-value').nth(1)).to_have_text('3')
                     checks.append('browser end-to-end propose, attach, submit, independent approve and effective recalculation')
+                    # New review-plan UI: explicit selection, preview, atomic proposal (no approval).
+                    login('engineer')
+                    page.locator('[data-view="plans"]').click()
+                    page.locator('#plan-ids').fill('finding-9')
+                    page.locator('#plan-reviewers').fill('reviewer')
+                    page.locator('#plan-rationale').fill('Synthetic reviewed plan for a bounded macro pin exception.')
+                    page.locator('#generate-plan').click()
+                    expect(page.locator('#plan-yaml')).to_have_value(__import__('re').compile('expected_audit_head'))
+                    page.locator('#preview-plan').click()
+                    expect(page.locator('#apply-plan')).to_be_enabled()
+                    expect(page.locator('#plan-result')).to_contain_text('"approvals_granted": 0')
+                    page.screenshot(path=str(args.output/'review-plan.png'), full_page=True)
+                    page.locator('#apply-plan').click()
+                    expect(page.locator('#plan-result')).to_contain_text('"applied": true')
+                    expect(page.locator('#apply-plan')).to_be_disabled()
+                    page.locator('[data-view="waivers"]').click()
+                    expect(page.locator('#waivers-view tr').filter(has_text='LVS.PIN')).to_contain_text('proposed')
+                    checks.append('review-plan browser template, preview, atomic apply and zero granted approvals')
                     # Confirm bearer storage isn't written into web storage.
                     assert page.evaluate('localStorage.length')==0
                     assert page.evaluate('sessionStorage.length')==0

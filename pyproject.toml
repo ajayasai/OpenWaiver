@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openwaiver"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first, cross-tool EDA waiver lifecycle management with fail-closed reviews"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ authors = [{name = "OpenWaiver contributors"}]
 keywords = ["eda", "waiver", "drc", "cdc", "lint", "verification"]
 dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "pydantic>=2.10,<3",
-  "PyYAML>=6.0.2,<7", "defusedxml>=0.7.1,<1"
+  "PyYAML>=6.0.2,<7", "defusedxml>=0.7.1,<1", "cryptography>=44,<52"
 ]
 
 [project.optional-dependencies]

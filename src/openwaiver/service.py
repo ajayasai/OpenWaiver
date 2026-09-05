@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 
 from .engine import approval_problems, assess, provenance
-from .errors import Conflict, Forbidden, OpenWaiverError
+from .errors import Conflict, Forbidden, NotFound, OpenWaiverError
 from .identity import approval_digest, digest, fingerprint
 from .importers import parse_report, strict_json
 from .models import Approval, Evidence, Policy, Principal, Run, Scope, Snapshot, Violation, Waiver, utcnow
@@ -19,6 +19,23 @@ class Service:
         self.store = store
 
     @staticmethod
+    def visible(actor: Principal | None, record) -> bool:
+        project = record.run.scope.project if isinstance(record, Snapshot) else record.scope.project
+        return actor is None or actor.projects is None or project in actor.projects
+
+    @staticmethod
+    def project(actor: Principal, project: str):
+        if actor.projects is not None and project not in actor.projects:
+            # Do not reveal whether a guessed foreign record exists.
+            raise NotFound("record not found in authorized projects")
+
+    def read(self, conn, table, id, actor: Principal | None):
+        item = self.store.get(conn, table, id)
+        if not self.visible(actor, item):
+            raise NotFound("record not found in authorized projects")
+        return item
+
+    @staticmethod
     def role(actor: Principal, *roles: str):
         if actor.role not in roles:
             raise Forbidden("role is not permitted for this operation")
@@ -28,8 +45,8 @@ class Service:
         if actor.role != "admin" and actor.name != w.owner:
             raise Forbidden("only the owner or an administrator can modify this waiver")
 
-    def _load(self, conn, id: str, version: int) -> Waiver:
-        w = self.store.get(conn, "waivers", id)
+    def _load(self, conn, id: str, version: int, actor: Principal) -> Waiver:
+        w = self.read(conn, "waivers", id, actor)
         if w.version != version:
             raise Conflict("stale version: reload before changing this waiver")
         return w
@@ -44,9 +61,11 @@ class Service:
     def import_run(self, actor: Principal, *, content: str, format: str, scope: Scope,
                    revision: str, complete: bool = False, checked_categories: list | None = None,
                    tool_version: str = "", rule_deck_digest: str = "", configuration_digest: str = "",
-                   source_root: Path | None = None, allow_plugins: bool = False) -> Run:
+                   source_root: Path | None = None, allow_plugins: bool = False,
+                   context_manifest: dict | None = None) -> Run:
         self.role(actor, "contributor", "reviewer", "admin")
         scope = Scope.model_validate(scope)
+        self.project(actor, scope.project)
         if format in ("verilator", "klayout") and scope.tool.lower() != format:
             raise OpenWaiverError("native adapter and tool namespace disagree")
         if format == "sarif":
@@ -55,6 +74,11 @@ class Service:
             if len(runs) == 1 and runs[0].get("tool", {}).get("driver", {}).get("name") != scope.tool:
                 raise OpenWaiverError("SARIF driver name and tool namespace disagree")
         violations = parse_report(content, format, source_root=source_root, allow_plugins=allow_plugins)
+        if context_manifest is not None:
+            from .context import ContextManifest, bind_context
+            if source_root is not None:
+                raise OpenWaiverError("choose source-root windows OR explicit dependency evidence, not both")
+            violations = bind_context(violations, ContextManifest.model_validate(context_manifest), scope, revision)
         run = Run(scope=scope, revision=revision, complete=complete,
                   checked_categories=checked_categories or [], source_sha256=hashlib.sha256(content.encode()).hexdigest(),
                   format=format, tool_version=tool_version, rule_deck_digest=rule_deck_digest,
@@ -72,7 +96,7 @@ class Service:
             raise Forbidden("contributors must own their proposals")
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            run = self.store.get(conn, "runs", run_id)
+            run = self.read(conn, "runs", run_id, actor)
             target = next((v for v in run.violations if v.id == violation_id), None)
             if target is None:
                 raise OpenWaiverError("violation is not in the selected run")
@@ -107,7 +131,7 @@ class Service:
             raise OpenWaiverError("unsupported or empty amendment")
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            w = self._load(conn, id, version)
+            w = self._load(conn, id, version, actor)
             self.owner(actor, w)
             if w.status == "revoked":
                 raise Conflict("revocation is terminal; create a new proposal")
@@ -135,7 +159,7 @@ class Service:
         sha = hashlib.sha256(content).hexdigest()
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            w = self._load(conn, id, version)
+            w = self._load(conn, id, version, actor)
             self.owner(actor, w)
             if w.status not in ("proposed", "rejected"):
                 raise Conflict("amend the waiver before changing evidence on a submitted/approved record")
@@ -155,7 +179,7 @@ class Service:
         self.role(actor, "contributor", "reviewer", "admin")
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            w = self._load(conn, id, version)
+            w = self._load(conn, id, version, actor)
             self.owner(actor, w)
             if w.status not in ("proposed", "rejected"):
                 raise Conflict("only proposals or rejected records can be submitted")
@@ -171,7 +195,7 @@ class Service:
         self.role(actor, "reviewer", "admin")
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            w = self._load(conn, id, version)
+            w = self._load(conn, id, version, actor)
             if actor.name not in w.reviewers or actor.name in (w.owner, w.creator):
                 raise Forbidden("only an assigned independent reviewer may decide")
             if w.status != "submitted":
@@ -196,7 +220,7 @@ class Service:
             raise OpenWaiverError("revocation reason required")
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            w = self._load(conn, id, version)
+            w = self._load(conn, id, version, actor)
             if actor.name not in [w.owner, *w.reviewers] and actor.role != "admin":
                 raise Forbidden("only owner, assigned reviewer or administrator can revoke")
             if w.status == "revoked":
@@ -211,11 +235,11 @@ class Service:
         self.role(actor, "contributor", "reviewer", "admin")
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            w = self._load(conn, id, version)
+            w = self._load(conn, id, version, actor)
             self.owner(actor, w)
             if w.status == "revoked":
                 raise Conflict("cannot rebind a revoked waiver")
-            run = self.store.get(conn, "runs", run_id)
+            run = self.read(conn, "runs", run_id, actor)
             target = next((v for v in run.violations if v.id == violation_id), None)
             if target is None or run.scope != w.scope:
                 raise OpenWaiverError("rebind must remain in the same project/tool/check stream")
@@ -233,17 +257,17 @@ class Service:
             w = Waiver.model_validate(data)
             return self._save(conn, actor, w, "rebind:approval-reset")
 
-    def assessment(self, run_id: str, today: date | None = None) -> dict:
+    def assessment(self, run_id: str, today: date | None = None, *, actor: Principal | None = None) -> dict:
         with self.store.transaction(write=False) as conn:
             self.store.verify(conn)
-            return assess(self.store.get(conn, "runs", run_id), self.store.all(conn, "waivers"),
+            return assess(self.read(conn, "runs", run_id, actor), self.store.all(conn, "waivers"),
                           self.store.policy(conn), today or utcnow().date())
 
     def freeze(self, actor: Principal, run_id: str, name: str, *, require_clean: bool = False) -> Snapshot:
         self.role(actor, "reviewer", "admin")
         with self.store.transaction() as conn:
             self.store.verify(conn)
-            run = self.store.get(conn, "runs", run_id)
+            run = self.read(conn, "runs", run_id, actor)
             policy = self.store.policy(conn)
             waivers = [w for w in self.store.all(conn, "waivers") if w.scope == run.scope]
             result = assess(run, waivers, policy, utcnow().date())
@@ -256,6 +280,8 @@ class Service:
 
     def set_policy(self, actor: Principal, policy: Policy):
         self.role(actor, "admin")
+        from .access import workspace_only
+        workspace_only(actor)
         with self.store.transaction() as conn:
             self.store.verify(conn)
             conn.execute("UPDATE meta SET value=? WHERE key='policy'", (policy.model_dump_json(),))

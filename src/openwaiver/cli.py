@@ -6,7 +6,7 @@ Use the API's token registry for independently authenticated human reviewers.
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, datetime
 import getpass
 import hashlib
 import json
@@ -26,10 +26,13 @@ from .service import Service
 from .store import Store
 
 
-def write_auth(path: Path, name: str, role: str) -> str:
-    Principal(name=name, role=role)
+def write_auth(path: Path, name: str, role: str, *, projects: list[str] | None = None,
+               expires_at: datetime | None = None) -> str:
+    Principal(name=name, role=role, projects=projects)
     token = secrets.token_urlsafe(32)
     record = {"name": name, "role": role, "sha256": hashlib.sha256(token.encode()).hexdigest()}
+    from .access import TokenRecord
+    record = TokenRecord(**record, projects=projects, expires_at=expires_at).model_dump(mode="json")
     if path.is_symlink():
         raise OpenWaiverError("refusing a symbolic-link token registry")
     existing = strict_json(path.read_text()) if path.exists() else {"tokens": []}
@@ -58,6 +61,10 @@ def parser():
     s.add_argument("--file", required=True)
     s.add_argument("--name", required=True)
     s.add_argument("--auth-role", required=True, choices=["viewer", "contributor", "reviewer", "admin"])
+    grants = s.add_mutually_exclusive_group(required=True)
+    grants.add_argument("--project", action="append", dest="projects", help="repeat for each exact authorized project")
+    grants.add_argument("--all-projects", action="store_true", help="explicit workspace-wide grant")
+    s.add_argument("--expires-at", type=datetime.fromisoformat, help="ISO timestamp with timezone")
     s = sub.add_parser("serve", help="serve the authenticated web dashboard")
     s.add_argument("--auth-file", required=True)
     s.add_argument("--host", default="127.0.0.1")
@@ -76,6 +83,7 @@ def parser():
     for name in ("tool-version", "rule-deck-digest", "configuration-digest"):
         s.add_argument(f"--{name}", default="")
     s.add_argument("--source-root")
+    s.add_argument("--context-manifest")
     s.add_argument("--allow-plugins", action="store_true")
     s = sub.add_parser("list")
     s.add_argument("collection", choices=["runs", "waivers", "snapshots"])
@@ -130,6 +138,8 @@ def parser():
     s.add_argument("--expected-head")
     s = sub.add_parser("policy")
     s.add_argument("--file", help="admin-only policy update from YAML")
+    from .cli_extensions import add_parsers
+    add_parsers(sub)
     return p
 
 
@@ -138,10 +148,14 @@ def serve(db, auth_file, host, port, allow_remote=False):
         raise OpenWaiverError("remote bind requires --allow-remote, TLS proxy and configured allowed hosts")
     from .api import create_app, token_records
     import uvicorn
-    uvicorn.run(create_app(db, token_records(Path(auth_file))), host=host, port=port)
+    uvicorn.run(create_app(db, auth_file=Path(auth_file)), host=host, port=port)
 
 
 def run(args) -> int:
+    from .cli_extensions import run_extension
+    extended = run_extension(args)
+    if extended is not None:
+        return extended
     command = args.command
     if command == "gate-release":
         from .release import ReleaseManifest, gate_release
@@ -153,7 +167,7 @@ def run(args) -> int:
             print(content)
         return 0 if result["gate_pass"] else 1
     if command == "auth-create":
-        token = write_auth(Path(args.file), args.name, args.auth_role)
+        token = write_auth(Path(args.file), args.name, args.auth_role, projects=args.projects, expires_at=args.expires_at)
         print(f"Token for {args.name} ({args.auth_role}); save it securely:\n{token}")
         return 0
     if command == "serve":
@@ -187,7 +201,8 @@ def run(args) -> int:
             revision=args.revision, complete=args.complete, checked_categories=[x for x in args.checked.split(",") if x],
             tool_version=args.tool_version, rule_deck_digest=args.rule_deck_digest,
             configuration_digest=args.configuration_digest, source_root=Path(args.source_root) if args.source_root else None,
-            allow_plugins=args.allow_plugins)
+            allow_plugins=args.allow_plugins,
+            context_manifest=load_yaml(Path(args.context_manifest).read_text()) if args.context_manifest else None)
     elif command == "list":
         with service.store.transaction(write=False) as conn:
             result = [x.model_dump(mode="json", exclude={"violations"} if args.collection == "runs" else set())

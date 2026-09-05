@@ -9,3 +9,10 @@ progress.bar-track.needs_review::-webkit-progress-value{background:#daa545}
 progress.bar-track.stale::-webkit-progress-value{background:#cc725c}
 progress.bar-track::-moz-progress-bar{background:#7b8b9e;border-radius:5px}
 .panel-spaced{margin-top:20px}
+
+/* Explicit change-plan workflow; keep long hashes contained at mobile widths. */
+.plan-grid{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:24px}
+.plan-grid label{display:grid;gap:8px}
+.plan-grid textarea{min-height:90px}
+.plan-grid input,.plan-grid textarea{width:100%;box-sizing:border-box}
+.plan-result{white-space:pre-wrap;overflow-wrap:anywhere;max-height:520px;overflow:auto}
