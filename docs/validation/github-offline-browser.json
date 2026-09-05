@@ -1,0 +1,14 @@
+{
+  "mode": "offline synthetic UI only; live browser writes not exercised",
+  "browser": "Chromium",
+  "passed": true,
+  "checks": [
+    "synthetic overview uses actual calculated 10/2/3/1 metrics",
+    "search, status/category filters and before/after geometry",
+    "waiver register, evidence metadata and historical events",
+    "frozen candidate comparison from actual backend snapshots",
+    "verified synthetic audit history and read-only policy",
+    "390px responsive layout without page-level horizontal overflow"
+  ],
+  "errors": []
+}
