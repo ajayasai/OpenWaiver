@@ -30,7 +30,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="openwaiver-native-") as directory:
         root = Path(directory)
         source = root / "top.sv"
-        source.write_text("module top(output wire y);\n  wire intentionally_unused_a;\n  wire intentionally_unused_b;\n  assign y = 1'b0;\nendmodule\n")
+        # Avoid Verilator's default *unused* name exemption: these must produce diagnostics.
+        source.write_text("module top(output wire y);\n  wire unconsumed_a;\n  wire unconsumed_b;\n  assign y = 1'b0;\nendmodule\n")
         def execute(extra=()):
             proc = subprocess.run([executable, "--lint-only", "--Wall", "-Wno-fatal", "--top-module", "top", *extra, "top.sv"],
                                   cwd=root, text=True, capture_output=True, timeout=60)
