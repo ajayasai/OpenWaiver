@@ -1,0 +1,60 @@
+name: Generate synthetic release assets
+on:
+  push:
+    branches: [publish/openwaiver-v0.1.0]
+    paths: [.github/workflows/publish-assets.yml]
+permissions:
+  contents: write
+jobs:
+  assets:
+    if: github.repository == 'ajayasai/OpenWaiver'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: publish/openwaiver-v0.1.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify uploaded source matches the locally tested release
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          expected = json.loads(Path('docs/validation/summary.json').read_text())['source_sha256']
+          mismatches = [p for p, h in expected.items() if hashlib.sha256(Path(p).read_bytes()).hexdigest() != h]
+          assert not mismatches, f'Source transfer mismatches: {mismatches}'
+          print(f'All {len(expected)} application, test and script hashes match.')
+          PY
+      - run: python -m pip install -e '.[dev,browser]'
+      - run: playwright install --with-deps chromium
+      - run: python -m pytest --junitxml=docs/validation/tests.xml
+      - run: python scripts/offline_smoke.py --output browser-results/offline
+      - run: python scripts/browser_smoke.py --output browser-results/live
+      - name: Copy only synthetic screenshots and validation records
+        run: |
+          mkdir -p docs/screenshots
+          cp browser-results/offline/overview.png docs/screenshots/overview.png
+          cp browser-results/offline/geometry-review.png docs/screenshots/geometry-review.png
+          cp browser-results/offline/candidate-comparison.png docs/screenshots/candidate-comparison.png
+          cp browser-results/offline/mobile.png docs/screenshots/mobile.png
+          cp browser-results/offline/results.json docs/validation/github-offline-browser.json
+          cp browser-results/live/results.json docs/validation/github-live-browser.json
+          python - <<'PY'
+          import hashlib, json, os, platform
+          from pathlib import Path
+          record = {'source_commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
+                    'python': platform.python_version(), 'synthetic_only': True,
+                    'source_hashes_match_original_local_validation': True,
+                    'tests_xml_sha256': hashlib.sha256(Path('docs/validation/tests.xml').read_bytes()).hexdigest()}
+          Path('docs/validation/github-publication.json').write_text(json.dumps(record, indent=2) + '\n')
+          PY
+      - name: Commit generated source-release assets to the publication branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/screenshots/overview.png docs/screenshots/geometry-review.png docs/screenshots/candidate-comparison.png docs/screenshots/mobile.png docs/validation/tests.xml docs/validation/github-offline-browser.json docs/validation/github-live-browser.json docs/validation/github-publication.json
+          git diff --cached --quiet && exit 0
+          git commit -m 'Add generated synthetic screenshots and GitHub validation evidence'
+          git push origin HEAD:publish/openwaiver-v0.1.0

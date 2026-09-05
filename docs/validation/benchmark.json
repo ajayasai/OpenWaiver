@@ -1,0 +1,52 @@
+{
+  "benchmark": "synthetic-pure-assessment-engine",
+  "created_at": "2026-09-05T07:53:56.772488+00:00",
+  "python": "3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.41",
+  "processor": "",
+  "limitations": [
+    "Excludes parsing, database access, full audit traversal, browser and network.",
+    "Not production capacity, commercial comparison, or a statistical safety guarantee.",
+    "Workload uses unique hierarchy/object IDs and controlled source/context changes."
+  ],
+  "results": [
+    {
+      "findings": 1000,
+      "waivers": 1000,
+      "repeats": 3,
+      "seconds": [
+        0.07770909100008794,
+        0.0333151799998177,
+        0.03300912000008793
+      ],
+      "median_seconds": 0.0333151799998177,
+      "counts": {
+        "waived": 600,
+        "needs_review": 200,
+        "stale": 100,
+        "open": 100
+      },
+      "false_automatic_suppressions_in_constructed_cases": 0,
+      "checks_passed": true
+    },
+    {
+      "findings": 10000,
+      "waivers": 10000,
+      "repeats": 3,
+      "seconds": [
+        0.46175679799989666,
+        0.50525679999987,
+        0.3604155770001398
+      ],
+      "median_seconds": 0.46175679799989666,
+      "counts": {
+        "waived": 6000,
+        "needs_review": 2000,
+        "stale": 1000,
+        "open": 1000
+      },
+      "false_automatic_suppressions_in_constructed_cases": 0,
+      "checks_passed": true
+    }
+  ]
+}
