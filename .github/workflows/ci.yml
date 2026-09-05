@@ -1,4 +1,4 @@
-name: Python and browser checks
+name: Python, browser and native adapter checks
 on:
   push:
     branches: [main]
@@ -7,28 +7,62 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         python: ['3.11', '3.12', '3.13']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5, pinned
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e '.[dev]'
-      - run: python -m pytest --cov=openwaiver --cov-report=term-missing
+      - run: python -m pytest --cov=openwaiver --cov-fail-under=90 --cov-report=term-missing --cov-report=json:validation-results/coverage.json --junitxml=validation-results/tests.xml
       - run: python -m compileall -q src tests scripts
-      - run: node --check src/openwaiver/static/app.js
+      - run: node --check src/openwaiver/static/app.js && node --check src/openwaiver/static/plans.js
       - run: python -m build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-${{ matrix.python }}-validation
+          path: |
+            validation-results/
+            dist/
+          retention-days: 14
+          if-no-files-found: error
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.13'
       - run: python -m pip install -e '.[browser]'
       - run: playwright install --with-deps chromium
-      - run: python scripts/browser_smoke.py
+      - run: python scripts/browser_smoke.py --output validation-results/live-browser
+      - run: python scripts/offline_smoke.py --output validation-results/offline-browser
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: browser-validation
+          path: validation-results/
+          retention-days: 14
+          if-no-files-found: error
+  native-verilator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - run: sudo apt-get update && sudo apt-get install -y verilator
+      - run: python -m pip install -e .
+      - run: python scripts/native_verilator.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: native-verilator-validation
+          path: validation-results/native-verilator.json
+          retention-days: 14
+          if-no-files-found: error
