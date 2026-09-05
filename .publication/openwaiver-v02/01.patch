@@ -1,0 +1,178 @@
+diff --git a/.gitignore b/.gitignore
+index 21de479..335650e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -23,3 +23,6 @@ auth.json
+ *.hmac
+ benchmark.json
+ browser-results/
++
++validation-results/
++*.pub
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7b648b3..377c978 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,13 @@
+ # Changelog
+ 
++## 0.2.0 — 2026-09-05
++
++Added bounded indexed candidate retrieval; exact project token grants with expiry, revocation and hot reload; atomic, preview-bound proposal/amendment plans in YAML/browser/API/CLI; content-derived explicit dependency manifests; offline Ed25519 artifact signatures and append-aware ledger checkpoints; standalone semantic bundle replay; and a native Verilator round-trip harness. Native export now refuses collateral suppression of unapproved findings sharing the generated rule/file/line scope. CI adds a 90% line-coverage gate, native executable checks, retained validation artifacts and pinned action revisions.
++
++283 local tests passed. Repeated-rule synthetic 10k assessment: 9.138 s to 0.355 s median vs v0.1, with all intended candidates recovered and no changed findings automatically waived. 100k: 4.409 s median. No commercial performance or signoff qualification claim. See `docs/V0.2.md`.
++
++Compatibility: persisted model/fingerprint schemas unchanged; legacy tokens remain workspace-wide; new `auth-create` requires explicit project or workspace grants. SSO, KMS/WORM, proprietary adapter qualification and full physical topology remain outside this release.
++
+ ## 0.1.0 — 2026-09-05
+ 
+ Initial implementation: strict cross-tool ingestion; semantic fingerprints; conservative moved/reshaped/context-change detection; independent review lifecycle; content-addressed evidence; SQLite transactional audit/history; role-authenticated API and browser; CLI/CI gates; explicit multi-tool release manifests; deterministic YAML projections and evidence bundles; immutable candidate comparisons; SARIF/JUnit/HTML exports; opt-in lossy Verilator control exporter; synthetic demo, regression tests, browser smoke test and reproducible engine benchmark.
+diff --git a/README.md b/README.md
+index 4af7b6f..0c4665e 100644
+--- a/README.md
++++ b/README.md
+@@ -4,10 +4,18 @@
+ 
+ OpenWaiver is a local-first application for DRC, LVS, ERC, lint, CDC, RDC, low-power checks, coverage exclusions and timing exceptions. It combines an authenticated browser workspace, a Python API, a command-line interface, SQLite storage and deterministic Git-friendly YAML exports.
+ 
+-**Version 0.1.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
++**Version 0.2.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
+ 
+ ![Synthetic OpenWaiver workspace](docs/screenshots/overview.png)
+ 
++## New in 0.2.0
++
++Project-scoped, expiring/revocable tokens; indexed movement candidates; explicit dependency-graph context; atomic Git-reviewable proposal plans in the browser/API/CLI; offline Ed25519 signatures and ledger checkpoints; independent evidence-bundle replay; and a native-export guard against unapproved same-line suppression.
++
++Local validation: **283 passing tests, 90.76% line coverage**. In one constructed 10,000-finding repeated-rule workload, median pure-engine assessment improved **25.7x versus v0.1**, while recovering all intended review candidates without automatically waiving any changed finding. This is not a commercial benchmark. CI separately tests native Verilator and authenticated browser workflows; inspect the exact commit's checks rather than inferring success from a feature list.
++
++Read [the 0.2 guide, migration details and raw measurements](docs/V0.2.md) and [the evidence-based competitive assessment](docs/COMPETITIVE_EVIDENCE.md).
++
+ ## Start with synthetic data
+ 
+ Use Python 3.11 or newer. From an extracted source archive or repository checkout:
+@@ -47,18 +55,18 @@ The reference chip and every approval/evidence item in this demo are **synthetic
+ 
+ ## Use a real workspace
+ 
+-Generate different tokens for different people. Save each printed plaintext token securely; the registry stores only hashes. Restart the server after changing the registry.
++Generate different tokens for different people. Save each printed plaintext token securely; the registry stores only hashes. The server reloads expiry, revocation and project grants on each authenticated request; malformed registry edits fail closed.
+ 
+ ```bash
+ openwaiver --db workspace/chip.sqlite3 init
+-openwaiver auth-create --file workspace/auth.json --name alice --auth-role contributor
+-openwaiver auth-create --file workspace/auth.json --name bob --auth-role reviewer
+-openwaiver auth-create --file workspace/auth.json --name carol --auth-role reviewer
+-openwaiver auth-create --file workspace/auth.json --name admin --auth-role admin
++openwaiver auth-create --file workspace/auth.json --name alice --auth-role contributor --project example-chip
++openwaiver auth-create --file workspace/auth.json --name bob --auth-role reviewer --project example-chip
++openwaiver auth-create --file workspace/auth.json --name carol --auth-role reviewer --project example-chip
++openwaiver auth-create --file workspace/auth.json --name admin --auth-role admin --all-projects
+ openwaiver --db workspace/chip.sqlite3 serve --auth-file workspace/auth.json
+ ```
+ 
+-Use the browser for authenticated human approvals. CLI `--actor` and `--role` are **trusted local attribution**, not authentication against someone who can modify the local files. All users of one API workspace can read that workspace; this release does not implement tenant or project-level access isolation.
++Use the browser for authenticated human approvals. CLI `--actor` and `--role` are **trusted local attribution**, not authentication against someone who can modify the local files. API tokens can be restricted to exact project names; the examples grant access to `example-chip`. Workspace-wide grants are explicit. Legacy registries without project grants retain workspace-wide access and should be migrated. This is application-level authorization, not separate-database tenant isolation.
+ 
+ Import an **unfiltered** report. `--complete` is an explicit assertion by your trusted collection pipeline, not something the parser can independently prove:
+ 
+@@ -96,7 +104,7 @@ openwaiver --db workspace/chip.sqlite3 export RUN_ID --format verilator \
+   --acknowledge-lossy --output generated.vlt
+ ```
+ 
+-Generate this derivative only after checking an **unfiltered report for the same revision**. Never feed an already filtered report back as proof that all checks ran. Unsafe native identifiers, wildcards and aggregate geometry markers are not silently broadened into waivers.
++Export is refused if its native rule/file/line scope also contains an unapproved finding. Generate this derivative only after checking an **unfiltered report for the same revision**. Never feed an already filtered report back as proof that all checks ran. Unsafe native identifiers, wildcards and aggregate geometry markers are not silently broadened into waivers.
+ 
+ **Calibre/IC Validator/SpyGlass/Questa proprietary waiver syntax is not implemented or certified.** Use documented neutral exports and add release-specific adapters with official specifications and test fixtures. The generic XML importer does not mean arbitrary vendor XML is supported. Timing exceptions and coverage exclusions are managed as records; this software does not validate their electrical or functional correctness.
+ 
+@@ -119,6 +127,7 @@ python -m pip install -e '.[dev,browser]'
+ python -m pytest --cov=openwaiver --cov-report=term-missing
+ python -m compileall -q src tests scripts
+ node --check src/openwaiver/static/app.js
++node --check src/openwaiver/static/plans.js
+ playwright install chromium
+ python scripts/browser_smoke.py
+ python scripts/benchmark.py --sizes 1000 10000 --output benchmark.json
+diff --git a/SECURITY.md b/SECURITY.md
+index fc651ba..50abae5 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -1,12 +1,14 @@
+ # Security and operational trust
+ 
+-OpenWaiver 0.1.0 is intended for a **trusted local workspace** or a carefully administered internal service. It is not a hardened multi-tenant SaaS service, regulatory evidence vault or signoff authority.
++OpenWaiver 0.2.0 is intended for a **trusted local workspace** or a carefully administered internal service. It is not a hardened multi-tenant SaaS service, regulatory evidence vault or signoff authority.
+ 
+ ## Access boundaries
+ 
+ The API derives identities from server-configured SHA-256 bearer-token records. Roles are viewer, contributor, reviewer and admin. Reviewers must additionally be assigned to the waiver and independent of its creator/owner; the admin role does not bypass independent approval. API requests cannot supply their own acting identity. Tokens are random, printed once at creation and kept in browser memory. A browser refresh signs out.
+ 
+-Each token can read the entire workspace. Roles control mutations, not project-level visibility. Use a separate database/service for separate confidentiality domains. Do not expose the service to the public Internet. The default bind is loopback. Remote binding requires explicit `--allow-remote`, a TLS reverse proxy, restricted networking and `OPENWAIVER_ALLOWED_HOSTS`. There is no integrated SSO/OIDC, rate limiting, account recovery or token expiry. Delete a token record and restart the server to revoke it.
++Tokens can carry exact project grants, timezone-aware expiration and revocation. All resource routes enforce project visibility as well as mutation roles. Legacy records without `projects` remain workspace-wide; migrate deliberately. `projects: []` grants nothing; null means unrestricted. File-backed registries reload on every authenticated request; invalid edited registries fail closed. Removing a record or marking it revoked takes effect on the next request. Project-scoped principals cannot administer global policy or download full-workspace audit bundles, even with the admin role.
++
++Use separate databases/services for separate confidentiality domains: this is application-level access control, not tenant-specific persistence, encryption, resource quotas or per-project policy. Do not expose the service to the public Internet. The default bind is loopback. Remote binding requires explicit `--allow-remote`, a TLS reverse proxy, restricted networking and `OPENWAIVER_ALLOWED_HOSTS`. Integrated SSO/OIDC, rate limiting and account recovery remain unimplemented.
+ 
+ Filesystem/database administrators are trusted. CLI actor/role flags are attribution for trusted operators, **not** a substitute for authenticated reviewers. Someone with write access to the source code, database or token registry can bypass controls. Protect those resources with OS permissions. Generated registries use mode 0600 on POSIX; configure equivalent Windows ACLs.
+ 
+@@ -16,13 +18,17 @@ The dashboard rejects cross-origin writes, does not enable CORS, escapes importe
+ 
+ Reports: 32 MiB UTF-8; 250,000 findings maximum. Request bodies: approximately 33 MiB. Evidence: 5 MiB per attachment, 50 attachments per waiver. YAML: 4 MiB and nesting depth 40; duplicate keys and aliases are rejected. XML uses defusedxml to reject entity expansion. Unsupported report records cause an import failure rather than invisible data loss. Plug-ins are disabled unless explicitly enabled and execute trusted local Python code; they are **not sandboxed**.
+ 
+-Inputs may still consume significant CPU within these limits. There is no distributed quota enforcement. Attachment signature checks are not antivirus scanning. File hashes verify bytes, not the truth of engineering evidence. The source-root option is CLI-only, resolves symlinks, refuses paths outside the root, and hashes a whole source file; it does not analyze dependency cones or netlist topology.
++Inputs may still consume significant CPU within these limits. There is no distributed quota enforcement. Attachment signature checks are not antivirus scanning. File hashes verify bytes, not the truth of engineering evidence. The source-root option is CLI-only, resolves symlinks, refuses paths outside the root, and hashes a whole source file; it does not infer dependency cones or netlist topology. The separate `context-build` collector hashes explicitly declared dependency graphs, rejects symlink dependencies and enforces byte budgets. Missing graph edges remain missing evidence; it cannot prove completeness. Run the collector against an immutable checkout.
+ 
+ ## Audit and signatures
+ 
+ State mutations and SHA-256 audit events commit together in SQLite. Historical waiver records are preserved in their events. The verifier checks the chain, current records and attachment bytes. Preserve audit heads independently; otherwise an administrator could replace the database and recompute every hash. This is **tamper-evident, not tamper-proof/WORM** storage.
+ 
+-Bundle checksums alone do not authenticate the creator. Optional HMAC seals authenticate only to parties that possess the shared secret; they are not public-key signatures or non-repudiation. Keep HMAC keys outside the repository and preserve the expected manifest hash/head using an independently protected channel. Version 0.1.0 has no KMS integration or trusted timestamp authority.
++Bundle checksums alone do not authenticate the creator. Optional HMAC seals authenticate only to parties that possess the shared secret; they are not public-key signatures or non-repudiation. Keep HMAC keys outside the repository and preserve the expected manifest hash/head using an independently protected channel. There is no KMS integration or trusted timestamp authority. Version 0.2 adds offline Ed25519 signatures over artifact digests and domain-separated ledger checkpoint claims. Verification requires an independently supplied public key and expected subject, checks expiration, and can reject checkpoints older than an externally retained minimum sequence. Keep private keys outside the workspace and repository. Signatures are not WORM storage, proof of tool execution, trusted timestamps or a substitute for independently retaining checkpoints. The HTTP API has no signing-key endpoint.
++
++## Review-plan boundary
++
++Git plans only propose or amend explicit records. Apply is atomic and requires the preview digest, current audit head, pinned record versions and target identities. Any amendment resets approvals. Arbitrary imported approval/status/evidence fields are rejected. A Git merge is not a waiver approval. Operators with local database or signing-key access remain trusted; CLI identity flags do not prove that a named human personally acted.
+ 
+ ## Verification boundary
+ 
+diff --git a/docs/COMPETITIVE_EVIDENCE.md b/docs/COMPETITIVE_EVIDENCE.md
+new file mode 100644
+index 0000000..c1d184b
+--- /dev/null
++++ b/docs/COMPETITIVE_EVIDENCE.md
+@@ -0,0 +1,36 @@
++# Competitive evidence and qualification boundaries
++
++Reviewed 2026-09-05. This is a claim/evidence ledger, not an unsupported winner ranking. A public feature page is not proof of performance, a missing public feature statement is not proof of absence, and these products do not all serve identical scopes.
++
++## Primary-source comparison baseline
++
++| Product / source | What its owner documents | Implication for OpenWaiver |
++|---|---|---|
++| Siemens [Calibre Auto-Waivers](https://www.siemens.com/en-gb/products/ic/calibre-design/physical-verification/auto-waivers/) | Integrated DRC waiver processing, retained waiver information and hierarchy-invariant handling | A generic geometry viewer is not equivalent to its native hierarchy-aware engine. OpenWaiver has not qualified Calibre execution or hierarchical physical matching. |
++| Synopsys [IC Validator VUE waiver flow](https://www.synopsys.com/implementation-and-signoff/resources/videos/waiver-flow-one.html) | Create waivers, import them for subsequent runs, append new waivers; VUE/PYDB paths | Import/reuse is not unique to OpenWaiver. A proprietary adapter requires official schemas and real executable tests. |
++| Cadence [Verisium Manager](https://www.cadence.com/en_US/home/tools/system-design-and-verification/ai-driven-verification/verisium-manager.html) | Enterprise verification management spanning verification engines and coverage | Do not call OpenWaiver's local SQLite dashboard an enterprise verification-platform replacement. |
++| Verilator [control-file specification](https://verilator.org/guide/latest/control.html) | Native controls can select rule, source file and line, with other matching forms | The current OpenWaiver exporter deliberately implements only the documented rule/file/line subset. Preflight now rejects collateral unapproved same-line suppression; native round-trip checks still qualify only the executed version/fixture. |
++
++## Claims implemented and falsifiable in 0.2
++
++| Claim | Reproduction / test | Boundary |
++|---|---|---|
++| Faster sparse repeated-rule candidate assessment than OpenWaiver 0.1 | `scripts/benchmark_candidates.py`; raw 10k baseline/current and 100k current observations under `docs/validation/v0.2` | 25.7x on the specific same-host 10k workload; not vendor performance, database throughput or a production SLA |
++| No approximate match grants approval | Existing engine tests plus `test_candidate_index.py`, including differential exhaustive retrieval checks | Finite test evidence, not a mathematical proof covering all inputs |
++| Cross-project records and attachments are not authorized by a guessed ID/hash | `test_access.py`: lists, details, mutations, evidence, snapshots, release checks and scoped administrator cases | Application authorization; no multi-tenant persistence or independent security audit |
++| A reviewed batch cannot silently apply to different state | `test_plans.py`: head/digest/version changes, atomic rollback, concurrency, foreign projects, status/approval injection | Proposal/amendment workflow only; no batch approvals or Git-merge-as-approval |
++| A changed declared dependency invalidates impacted targets only | `test_context.py`: actual file changes, transitive inputs, graph/settings changes, unrelated inputs, deep graphs | Explicit graph, not automatically inferred RTL/netlist dependencies or completeness proof |
++| Evidence can be checked without access to its original database | `test_attestation.py`, `test_cli_extensions.py`: bundle replay, tampering, external key/subject, expiration, checkpoint prefix and rollback | Requires trusted public-key distribution; not KMS, WORM, trusted timestamps or real EDA provenance |
++| Native derivative does not hide the fixture's unapproved sibling | `scripts/native_verilator.py`; successful native CI artifact records actual tool version | Verilator fixture only, not Calibre/IC Validator/SpyGlass/Questa qualification |
++
++## What would justify a broader superiority claim
++
++Use legally available vendor installations and the same redistributable design/report corpus. Publish tool versions, PDK/rule-deck revisions, hardware, configuration, run completeness, runtime and memory, with no hidden preprocessing advantage. Independently label unchanged, moved, reshaped, split/merged, hierarchy-promoted, duplicated and truly new occurrences. Measure false suppression separately from review-candidate recall, ambiguity, reviewer effort and export scope. Never trade false suppression for a prettier match rate.
++
++Run an independent penetration test and project-isolation review; restore signed backups and demonstrate rollback/rewrite detection with off-host retained checkpoints. Exercise real multi-user conflicts, operating-system/database limits, enterprise identity integration, migration and disaster recovery. Obtain representative production users and qualified proprietary adapters before claiming native signoff replacement.
++
++These are **uncompleted evidence requirements**, not features disguised as completed work. The present defensible positioning is an open, inspectable cross-tool governance layer with measured improvements over its own baseline. It complements native verification engines; it has not demonstrated dominance over all closed-source alternatives.
++
++## Cryptographic implementation reference
++
++[PyCA cryptography's Ed25519 API](https://cryptography.io/en/latest/hazmat/primitives/asymmetric/ed25519/) provides the standard signing and verification primitive. OpenWaiver adds a versioned, domain-separated purpose/sequence/digest claim. It does not implement a new cryptographic algorithm or claim certification of its envelope.
