@@ -42,7 +42,7 @@ def _instances(layout, top, db):
             raise OpenWaiverError("instance expansion budget exceeded")
         places[cell.name].append(_placement(transform))
         for instance in cell.each_inst():
-            for local in instance.each_cplx_trans():
+            for local in instance.cell_inst.each_cplx_trans():
                 _placement(local)  # Reject rounding at every hierarchy level.
                 stack.append((layout.cell(instance.cell_index), transform * local, ancestors + (index,)))
                 if len(stack) + count > 100000:

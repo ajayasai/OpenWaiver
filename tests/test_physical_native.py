@@ -132,3 +132,43 @@ def test_native_context_change_blocks_existing_approval(tmp_path,service,actors)
     out=tmp_path/"native-physical-result.json"
     out.write_text(json.dumps(dict(klayout_version=version("klayout"),passed=True,synthetic_only=True,
                                   native_markers=len(pairs),changed_neighbors_blocked=True),indent=2))
+
+
+def test_native_regular_array_selection_keeps_each_occurrence(tmp_path):
+    path, content, layout = make_layout(tmp_path)
+    top = layout.cell("TOP")
+    for instance in list(top.each_inst()):
+        instance.delete()
+    top.insert(db.CellInstArray(layout.cell("MACRO").cell_index(), db.Trans(1000, 500),
+                                db.Vector(3000, 0), db.Vector(0, 0), 3, 1))
+    layout.write(str(path))
+    with pytest.raises(OpenWaiverError, match="ambiguous"):
+        extract(path, content)
+    manifest = extract(path, content, placements={"native-width": {"dx": 4000, "dy": 500}})
+    neighborhood = manifest.targets["native-width"]
+    assert neighborhood.placement == Placement(dx=4000, dy=500)
+    assert all(4000 <= x <= 4300 for shape in neighborhood.shapes for x, _ in shape.hull)
+
+
+def test_native_nested_rotated_mirrored_hierarchy(tmp_path):
+    path, content, layout = make_layout(tmp_path)
+    outer = layout.create_cell("ROOT")
+    outer.insert(db.CellInstArray(layout.cell("TOP").cell_index(), db.ICplxTrans(1, 90, True, 20000, 10000)))
+    layout.write(str(path))
+    manifest = extract(path, content, top_cell="ROOT")
+    assert manifest.targets["native-width"].placement == Placement(rotation=90, mirror=True, dx=20500, dy=11000)
+
+
+def test_native_shape_properties_are_part_of_context(tmp_path):
+    from openwaiver.importers import parse_report
+    path, content, layout = make_layout(tmp_path, "oas")
+    shape = next(layout.cell("MACRO").shapes(layout.find_layer(1, 0)).each())
+    shape.set_property(7, "domain-A")
+    layout.write(str(path))
+    before = extract(path, content)
+    assert any(p.properties == {"7": '\"domain-A\"'} for p in before.targets["native-width"].shapes)
+    shape.set_property(7, "domain-B")
+    layout.write(str(path))
+    after = extract(path, content)
+    marker = parse_report(content, "json")[0]
+    assert context_hash(marker, before.recipe, before.targets[marker.id]) != context_hash(marker, after.recipe, after.targets[marker.id])

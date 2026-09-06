@@ -1,6 +1,6 @@
 {
   "src/openwaiver/physical.py": "b8c51c0c0fd232d7d62575c05ea529e28baafaa2459c40c5d6c9ef674e9eb03f",
-  "src/openwaiver/physical_native.py": "789d93d9916630eebb316e9011cc402c91240bb1110265931c12baadcbe95879",
+  "src/openwaiver/physical_native.py": "4c772b9b2da32417ae8008681f400dd780f858bd0e00443773f24a769b444ced",
   "src/openwaiver/physical_routes.py": "486a6064e4c24145aaa1c18273a980b4aca085c2812507453d872d7be81c2e66",
   "src/openwaiver/physical_cli.py": "130fff4a56a1ea5e6747a44bdc903ad01f6ac8ac9d5bb79c107186fa5c34accb",
   "src/openwaiver/federation.py": "a009a12e145fa1df4ab6707af07a9fe446d8ad8906879df65c10f322a57fbd23",
@@ -8,7 +8,7 @@
   "src/openwaiver/static/physical.css": "3e39f6e21448aa1ae903450cec7d4ea4eddc2044620ee5aa2d373f6ce4402463",
   "src/openwaiver/static/physical.js": "795c410b74620f832cc56bd80c2561b21b388decb78d4bfa63c19157cf8628d0",
   "tests/test_physical.py": "85b721d6596ecf9eb07654e1fa0bde8aacc78c88905ea9c786ec48c7367710ac",
-  "tests/test_physical_native.py": "fef713ec3c3cd359cf4beccf46230222664d207e733a04782016267296aa93c3",
+  "tests/test_physical_native.py": "1ad93e65396f61039b51bafa47a5107f100d99adb0998d0bbbf3617788fc456b",
   "tests/test_federation.py": "48a9ef51e87d41173a5e9cad7be851d1d6ca312ce7267ceb28bcd318379ff1a5",
   "tests/test_physical_cli.py": "305eda37a7162b56dd4cc20abb12d9693b5f20e8e2a301e4f9fbc475c63bfdb4"
 }
