@@ -62,7 +62,7 @@ class Service:
                    revision: str, complete: bool = False, checked_categories: list | None = None,
                    tool_version: str = "", rule_deck_digest: str = "", configuration_digest: str = "",
                    source_root: Path | None = None, allow_plugins: bool = False,
-                   context_manifest: dict | None = None) -> Run:
+                   context_manifest: dict | None = None, physical_manifest: dict | None = None) -> Run:
         self.role(actor, "contributor", "reviewer", "admin")
         scope = Scope.model_validate(scope)
         self.project(actor, scope.project)
@@ -79,10 +79,18 @@ class Service:
             if source_root is not None:
                 raise OpenWaiverError("choose source-root windows OR explicit dependency evidence, not both")
             violations = bind_context(violations, ContextManifest.model_validate(context_manifest), scope, revision)
+        if physical_manifest is not None:
+            from .physical import PhysicalManifest, bind_physical
+            if context_manifest is not None or source_root is not None:
+                raise OpenWaiverError("physical evidence cannot be combined with another context source")
+            physical = PhysicalManifest.model_validate(physical_manifest)
+            violations = bind_physical(violations, physical, scope, revision,
+                                       hashlib.sha256(content.encode()).hexdigest())
+            physical_manifest = physical.model_dump(mode="json")
         run = Run(scope=scope, revision=revision, complete=complete,
                   checked_categories=checked_categories or [], source_sha256=hashlib.sha256(content.encode()).hexdigest(),
                   format=format, tool_version=tool_version, rule_deck_digest=rule_deck_digest,
-                  configuration_digest=configuration_digest, violations=violations)
+                  configuration_digest=configuration_digest, violations=violations, physical_manifest=physical_manifest)
         with self.store.transaction() as conn:
             self.store.verify(conn)
             self.store.save(conn, "runs", run, actor.name, "import", create=True)

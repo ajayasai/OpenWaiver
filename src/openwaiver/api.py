@@ -40,6 +40,7 @@ class ImportRequest(Model):
     rule_deck_digest: str = ""
     configuration_digest: str = ""
     context_manifest: dict | None = None
+    physical_manifest: dict | None = None
 
 
 class Proposal(Model):
@@ -117,16 +118,25 @@ class BodyLimit:
         await self.app(scope, bounded_receive, send)
 
 
-def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None, *, auth_file: str | Path | None = None) -> FastAPI:
+def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None, *,
+               auth_file: str | Path | None = None, federation_file: str | Path | None = None) -> FastAPI:
+    from .federation import load_config, validate_access_token, InvalidAccessToken, FederationUnavailable
+    federation_file = federation_file or os.environ.get("OPENWAIVER_FEDERATION_FILE")
+    if federation_file:
+        load_config(federation_file)  # Invalid trust configuration prevents startup.
     if auth is None:
         registry = auth_file or os.environ.get("OPENWAIVER_AUTH_FILE")
-        if not registry:
-            raise OpenWaiverError("OPENWAIVER_AUTH_FILE is required; use openwaiver auth-create")
-        auth_file = Path(registry)
-        auth = token_records(auth_file)
-    if not auth:
+        if registry:
+            auth_file = Path(registry)
+            auth = token_records(auth_file)
+        elif federation_file:
+            auth = []
+        else:
+            raise OpenWaiverError("OPENWAIVER_AUTH_FILE or OPENWAIVER_FEDERATION_FILE is required")
+    if not auth and not federation_file:
         raise OpenWaiverError("refusing to start without authentication")
-    validate_records(auth)
+    if auth:
+        validate_records(auth)
     service = Service(Store(db_path or os.environ.get("OPENWAIVER_DB", "workspace/openwaiver.sqlite3")))
     app = FastAPI(title="OpenWaiver", version=__version__, description="Cross-tool waiver lifecycle API")
     app.state.service = service
@@ -138,6 +148,15 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
     def principal(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)):
         if credentials is None:
             raise HTTPException(401, "bearer token required", headers={"WWW-Authenticate": "Bearer"})
+        if federation_file and credentials.credentials.count(".") == 2:
+            try:
+                return validate_access_token(credentials.credentials, load_config(federation_file))
+            except FederationUnavailable:
+                raise HTTPException(503, "federation trust configuration unavailable") from None
+            except InvalidAccessToken:
+                raise HTTPException(401, "invalid access token", headers={"WWW-Authenticate": "Bearer"}) from None
+        if not auth and not auth_file:
+            raise HTTPException(401, "invalid token", headers={"WWW-Authenticate": "Bearer"})
         candidate = hashlib.sha256(credentials.credentials.encode()).hexdigest()
         match = None
         try:
@@ -196,7 +215,7 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
              actor: Principal = Depends(principal)):
         with service.store.transaction(write=False) as conn:
             items = [x for x in reversed(service.store.all(conn, "runs")) if service.visible(actor, x)]
-            return {"total": len(items), "items": [{**x.model_dump(mode="json", exclude={"violations"}),
+            return {"total": len(items), "items": [{**x.model_dump(mode="json", exclude={"violations", "physical_manifest"}),
                      "violation_count": len(x.violations)} for x in items[offset:offset + limit]]}
 
     @app.post("/api/runs", status_code=201)
@@ -333,6 +352,8 @@ def create_app(db_path: str | Path | None = None, auth: list[dict] | None = None
 
     from .extensions import register_routes
     register_routes(app, service, principal)
+    from .physical_routes import register_physical_routes
+    register_physical_routes(app, service, principal)
 
     static = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=static), name="static")
