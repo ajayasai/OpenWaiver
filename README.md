@@ -1,10 +1,16 @@
 # OpenWaiver
 
+**v0.3 upgrade:** [Physical layout context and federated access-token authentication](docs/V0.3.md).
+Native GDS/OASIS extraction retains polygon holes and hierarchy placements. The
+[physical review workspace](http://127.0.0.1:8765/physical) visualizes retained evidence;
+transform matches never approve waivers. Existing v0.2 records remain readable.
+
+
 **Cross-tool EDA waiver lifecycle management. Every exception has a reason, an owner, a boundary and a review trail.**
 
 OpenWaiver is a local-first application for DRC, LVS, ERC, lint, CDC, RDC, low-power checks, coverage exclusions and timing exceptions. It combines an authenticated browser workspace, a Python API, a command-line interface, SQLite storage and deterministic Git-friendly YAML exports.
 
-**Version 0.2.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
+**Version 0.3.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
 
 ![Synthetic OpenWaiver workspace](docs/screenshots/overview.png)
 

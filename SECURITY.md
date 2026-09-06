@@ -1,14 +1,34 @@
 # Security and operational trust
 
-OpenWaiver 0.2.0 is intended for a **trusted local workspace** or a carefully administered internal service. It is not a hardened multi-tenant SaaS service, regulatory evidence vault or signoff authority.
+OpenWaiver 0.3.0 is intended for a **trusted local workspace** or a carefully administered internal service. It is not a hardened multi-tenant SaaS service, regulatory evidence vault or signoff authority.
+
+## Physical evidence and federation (v0.3)
+
+See [the v0.3 operating and trust guide](docs/V0.3.md) for configuration and limits.
+Federation verifies RS256 access tokens with administrator-pinned public keys,
+exact issuer/audience and provisioned subject/client/project bindings. Token
+roles, emails and project claims never create grants. Invalid JWTs do not fall
+back to local tokens. This is not a browser OAuth login implementation or a
+certified identity-provider deployment. Protect the federation file outside Git;
+rotate keys and revoke subjects through atomic administrative updates.
+
+Physical evidence is bound to the declared report, scope, revision, placement
+and extraction recipe. Its coverage is limited to declared layers/windows;
+retaining or signing a manifest does not prove the producer supplied complete
+or truthful geometry. Native layout parsing has no arbitrary-script endpoint,
+but compressed inputs can exceed Python-side byte budgets in native memory.
+Run extraction in a CPU/memory-limited worker for untrusted inputs. Unsupported
+shapes, transforms and ambiguous occurrences are rejected, not approximated.
+Older records stay readable; do not downgrade a workspace after writing v0.3
+physical records. Back up and validate migration before use.
 
 ## Access boundaries
 
-The API derives identities from server-configured SHA-256 bearer-token records. Roles are viewer, contributor, reviewer and admin. Reviewers must additionally be assigned to the waiver and independent of its creator/owner; the admin role does not bypass independent approval. API requests cannot supply their own acting identity. Tokens are random, printed once at creation and kept in browser memory. A browser refresh signs out.
+The API derives identities from server-configured SHA-256 bearer-token records or explicitly configured, pinned-key federated access tokens. Roles are viewer, contributor, reviewer and admin. Reviewers must additionally be assigned to the waiver and independent of its creator/owner; the admin role does not bypass independent approval. API requests cannot supply their own acting identity. Locally issued tokens are random and printed once at creation. Tokens are kept in browser memory. A browser refresh signs out.
 
 Tokens can carry exact project grants, timezone-aware expiration and revocation. All resource routes enforce project visibility as well as mutation roles. Legacy records without `projects` remain workspace-wide; migrate deliberately. `projects: []` grants nothing; null means unrestricted. File-backed registries reload on every authenticated request; invalid edited registries fail closed. Removing a record or marking it revoked takes effect on the next request. Project-scoped principals cannot administer global policy or download full-workspace audit bundles, even with the admin role.
 
-Use separate databases/services for separate confidentiality domains: this is application-level access control, not tenant-specific persistence, encryption, resource quotas or per-project policy. Do not expose the service to the public Internet. The default bind is loopback. Remote binding requires explicit `--allow-remote`, a TLS reverse proxy, restricted networking and `OPENWAIVER_ALLOWED_HOSTS`. Integrated SSO/OIDC, rate limiting and account recovery remain unimplemented.
+Use separate databases/services for separate confidentiality domains: this is application-level access control, not tenant-specific persistence, encryption, resource quotas or per-project policy. Do not expose the service to the public Internet. The default bind is loopback. Remote binding requires explicit `--allow-remote`, a TLS reverse proxy, restricted networking and `OPENWAIVER_ALLOWED_HOSTS`. Interactive SSO/OIDC login, rate limiting and account recovery remain unimplemented.
 
 Filesystem/database administrators are trusted. CLI actor/role flags are attribution for trusted operators, **not** a substitute for authenticated reviewers. Someone with write access to the source code, database or token registry can bypass controls. Protect those resources with OS permissions. Generated registries use mode 0600 on POSIX; configure equivalent Windows ACLs.
 

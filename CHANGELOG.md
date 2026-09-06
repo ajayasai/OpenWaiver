@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 — 2026-09-06
+
+Retained, report-bound physical context; native GDS/OASIS extraction through KLayout; orthogonal whole-neighborhood comparisons; read-only before/after geometry workspace; explicit physical CLI; pinned-key federated JWT access-token validation and project mapping. Changed context blocks approval reuse. Existing record serialization is preserved when physical evidence is absent. Qualification remains version/fixture-specific.
+
 ## 0.2.0 — 2026-09-05
 
 Added bounded indexed candidate retrieval; exact project token grants with expiry, revocation and hot reload; atomic, preview-bound proposal/amendment plans in YAML/browser/API/CLI; content-derived explicit dependency manifests; offline Ed25519 artifact signatures and append-aware ledger checkpoints; standalone semantic bundle replay; and a native Verilator round-trip harness. Native export now refuses collateral suppression of unapproved findings sharing the generated rule/file/line scope. CI adds a 90% line-coverage gate, native executable checks, retained validation artifacts and pinned action revisions.

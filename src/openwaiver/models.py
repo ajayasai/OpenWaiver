@@ -7,7 +7,7 @@ import re
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, model_serializer
 
 
 def utcnow() -> datetime:
@@ -135,6 +135,20 @@ class Run(Model):
     format: str
     created_at: datetime = Field(default_factory=utcnow)
     violations: list[Violation] = Field(default_factory=list, max_length=250000)
+    physical_manifest: dict | None = None
+
+    @model_serializer(mode="wrap")
+    def compatible_dump(self, handler):
+        data = handler(self)
+        if self.physical_manifest is None:
+            data.pop("physical_manifest", None)
+        return data
+
+    @model_validator(mode="after")
+    def physical_binding(self):
+        from .physical import validate_run
+        validate_run(self)
+        return self
 
     @model_validator(mode="after")
     def coverage_and_ids(self):
