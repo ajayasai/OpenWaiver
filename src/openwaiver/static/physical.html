@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenWaiver · Physical evidence</title><link rel="stylesheet" href="/static/physical.css"></head>
+<body><header><a href="/">OpenWaiver</a><span>PHYSICAL EVIDENCE / READ-ONLY REVIEW</span></header>
+<main><h1>Inspect the context. Not just the marker.</h1><p class="lead">Compare the actual retained geometry around a violation. Holes, layers, placement, and evidence provenance stay visible. No action on this page grants an approval.</p>
+<form id="login"><label>Access token<input id="token" type="password" required autocomplete="off" placeholder="Local token or provisioned access token"></label><button>Connect</button><button type="button" id="logout">Disconnect</button><p id="identity" role="status">Not connected. Tokens are held in memory only.</p></form>
+<form id="inspect"><div class="fields"><label>Before run<input id="before-run" list="runs" required placeholder="run_…"></label><label>Before occurrence<input id="before-id" required placeholder="marker ID"></label><label>After run<input id="after-run" list="runs" required placeholder="run_…"></label><label>After occurrence<input id="after-id" required placeholder="marker ID"></label></div><datalist id="runs"></datalist><button>Inspect both neighborhoods</button><button type="button" id="compare">Find context correspondences</button></form>
+<p id="status" role="status" aria-live="polite">Connect and select two runs with physical evidence.</p>
+<div class="views"><section><h2>Before</h2><div class="drawing" id="before-drawing"></div><pre id="before-info"></pre></section><section><h2>After</h2><div class="drawing" id="after-drawing"></div><pre id="after-info"></pre></section></div>
+<section class="results"><h2>Review correspondences</h2><p>Rotations and reflections apply to the entire neighborhood together. Repeated or non-unique contexts remain ambiguous. These are suggestions, not approval transfers.</p><pre id="comparison">No comparison requested.</pre></section>
+<footer>Physical coverage is limited to the declared layers and window. This view does not infer electrical connectivity or certify signoff.</footer></main><script src="/static/physical.js" defer></script></body></html>
