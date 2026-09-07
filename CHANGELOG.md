@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 — 2026-09-07
+
+Added independently approved pinned release contracts, scope-authorized execution receipts with separate producer/publisher keys, execution freshness and risk budgets, signed multi-tool release capsules, offline replay with explicit historical/frozen/live validity distinctions, optional live reconciliation, a project-authorized release review page and CLI, native two-tool rehearsal, and adversarial regression cases. Existing persisted models and legacy release endpoints retain their semantics. No commercial comparison or proprietary adapter qualification is claimed. See `docs/V0.4.md`.
+
 ## 0.3.0 — 2026-09-06
 
 Retained, report-bound physical context; native GDS/OASIS extraction through KLayout; orthogonal whole-neighborhood comparisons; read-only before/after geometry workspace; explicit physical CLI; pinned-key federated JWT access-token validation and project mapping. Changed context blocks approval reuse. Existing record serialization is preserved when physical evidence is absent. Qualification remains version/fixture-specific.

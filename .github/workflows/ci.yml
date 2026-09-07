@@ -28,26 +28,28 @@ jobs:
           import json, platform
           from pathlib import Path
           from importlib.metadata import version
-          data = {'python': platform.python_version(), 'klayout': version('klayout'), 'PyJWT': version('PyJWT')}
+          data = {'python': platform.python_version(), 'klayout': version('klayout'), 'PyJWT': version('PyJWT'), 'cryptography': version('cryptography')}
           Path('validation-results/environment.json').write_text(json.dumps(data, indent=2))
           print(data)
           PY
       - run: python -m pytest --tb=short --cov=openwaiver --cov-fail-under=90 --cov-report=term-missing --cov-report=json:validation-results/coverage.json --junitxml=validation-results/tests.xml
-      - name: Require native tests to execute, not skip
+      - name: Require native and release tests to execute, not skip
         run: |
           python - <<'PY'
           import xml.etree.ElementTree as ET
           root = ET.parse('validation-results/tests.xml').getroot()
           native = [x for x in root.iter('testcase') if x.get('classname', '').endswith('test_physical_native')]
+          release = [x for x in root.iter('testcase') if x.get('classname', '').endswith('test_release_assurance')]
           assert len(native) >= 23, 'native conformance cases missing'
-          assert all(x.find('skipped') is None and x.find('failure') is None and x.find('error') is None for x in native)
+          assert len(release) >= 71, 'release assurance cases missing'
           assert not list(root.iter('skipped')), 'release regression tests must not silently skip'
-          print('Native cases executed:', len(native))
+          assert not list(root.iter('failure')) and not list(root.iter('error'))
+          print('Native cases executed:', len(native), 'Release cases executed:', len(release))
           PY
       - run: python -m compileall -q src tests scripts
-      - run: node --check src/openwaiver/static/app.js && node --check src/openwaiver/static/plans.js && node --check src/openwaiver/static/physical.js
+      - run: for source in src/openwaiver/static/*.js; do node --check "$source"; done
       - run: python -m build
-      - name: Verify installed wheel contains physical assets and entry point
+      - name: Verify isolated installed wheel, release and physical entry points
         run: |
           python -m venv /tmp/openwaiver-wheel-check
           /tmp/openwaiver-wheel-check/bin/python -m pip install dist/*.whl
@@ -55,13 +57,16 @@ jobs:
           /tmp/openwaiver-wheel-check/bin/python - <<'PY'
           from importlib.resources import files
           from importlib.metadata import version
-          assert version('openwaiver') == '0.3.0'
-          assert files('openwaiver').joinpath('static/physical.html').is_file()
-          assert files('openwaiver').joinpath('static/physical.js').is_file()
+          assert version('openwaiver') == '0.4.0'
+          for asset in ['physical.html', 'physical.js', 'releases.html', 'releases.js', 'releases.css']:
+              assert files('openwaiver').joinpath('static/' + asset).is_file(), asset
           from openwaiver.federation import validate_access_token
           from openwaiver.physical import PhysicalManifest
+          from openwaiver.assurance import ReleaseContract
+          from openwaiver.capsule import verify_capsule
           PY
           /tmp/openwaiver-wheel-check/bin/openwaiver-physical --help
+          /tmp/openwaiver-wheel-check/bin/openwaiver-release --help
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -86,6 +91,7 @@ jobs:
       - run: python scripts/browser_smoke.py --output validation-results/live-browser
       - run: python scripts/offline_smoke.py --output validation-results/offline-browser
       - run: python scripts/physical_browser_smoke.py --output validation-results/physical-browser
+      - run: python scripts/release_browser_smoke.py --output validation-results/release-browser
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -104,12 +110,15 @@ jobs:
         with:
           python-version: '3.13'
       - run: sudo apt-get update && sudo apt-get install -y verilator
-      - run: python -m pip install -e .
+      - run: python -m pip install -e '.[physical]'
       - run: python scripts/native_verilator.py
+      - run: python scripts/native_release_rehearsal.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: native-verilator-validation
-          path: validation-results/native-verilator.json
+          path: |
+            validation-results/native-verilator.json
+            validation-results/native-release.json
           retention-days: 14
           if-no-files-found: error
