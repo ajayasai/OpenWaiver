@@ -1,0 +1,30 @@
+{
+  "source_commit": "a80fd5ab47f0e27c57c51593665dabdd8cd612e5",
+  "run_id": 34083762928,
+  "run_url": "https://github.com/ajayasai/OpenWaiver/actions/runs/34083762928",
+  "date": "2026-09-07",
+  "all_five_jobs_passed": true,
+  "inspected_python_version": "3.13.15",
+  "tests": 479,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "new_release_cases": 71,
+  "native_klayout_cases": 23,
+  "covered_statements": 3404,
+  "total_statements": 3669,
+  "coverage_percent": 92.77732352139547,
+  "python_job_versions": ["3.11", "3.12", "3.13"],
+  "native_tools": {"verilator": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)", "klayout": "0.30.12"},
+  "native_release_rehearsal": {"passed": true, "waived_findings": 2, "capsule_bytes": 4305},
+  "release_browser": {"passed": true, "page_errors": [], "mobile_width": 390},
+  "published_wheel_local_release_cases_passed": 71,
+  "artifact_zip_sha256": {
+    "python-3.13-validation": "6dd7c845f244ba3fe1c2bfa23aa83ea3857d4d328623f4844e683d086ba6a49f",
+    "browser-validation": "0b35f47894cab1b19fad5c784edd96ed87aaf98b5a39a22a5885f802092be3cb",
+    "native-verilator-validation": "a4b36d00a71bb578b47d714e8cbc3a5cb6122be66f84fb7855f4a71664caf970"
+  },
+  "synthetic_only": true,
+  "commercial_benchmark": false,
+  "signoff_certified": false
+}
