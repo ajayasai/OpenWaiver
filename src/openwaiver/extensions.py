@@ -35,6 +35,9 @@ class ContextComparison(Model):
 
 
 def register_routes(app, service, principal):
+    from .assurance_routes import register_assurance_routes
+    register_assurance_routes(app, service, principal)
+
     @app.post("/api/review-plans/template")
     def template(body: TemplateRequest, actor: Principal = Depends(principal)):
         plan = proposal_template(service, actor, **body.model_dump())
