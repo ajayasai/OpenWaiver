@@ -1,24 +1,31 @@
 # OpenWaiver
 
-**v0.3 upgrade:** [Physical layout context and federated access-token authentication](docs/V0.3.md).
-Native GDS/OASIS extraction retains polygon holes and hierarchy placements. The
-[physical review workspace](http://127.0.0.1:8765/physical) visualizes retained evidence;
-transform matches never approve waivers. Existing v0.2 records remain readable.
-
-
 **Cross-tool EDA waiver lifecycle management. Every exception has a reason, an owner, a boundary and a review trail.**
 
 OpenWaiver is a local-first application for DRC, LVS, ERC, lint, CDC, RDC, low-power checks, coverage exclusions and timing exceptions. It combines an authenticated browser workspace, a Python API, a command-line interface, SQLite storage and deterministic Git-friendly YAML exports.
 
-**Version 0.3.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
+**Version 0.4.0 — early release, not signoff-certified.** This is working software with regression tests, not a promise of superiority over mature commercial verification products. Approximate matches never suppress violations. Only unchanged, uniquely identified findings with currently valid approvals can be waived.
 
 ![Synthetic OpenWaiver workspace](docs/screenshots/overview.png)
+
+## New in 0.4.0
+
+**Release assurance across tools:** independently approved, fully pinned contracts; scope-authorized signed execution receipts; execution-age checks; explicit waiver-risk budgets; and portable signed release capsules with offline policy replay and optional live-state reconciliation. Separate producer and publisher keys are required. The new `/releases` browser workspace explains blockers without granting approvals.
+
+Use `openwaiver-release --help`. Read the [complete configuration and operating guide](docs/V0.4.md), [executed validation](docs/VALIDATION_V0.4.md), and [commercial-comparison protocol](docs/RELEASE_COMPARISON.md). Existing legacy gates retain their old semantics; opt into the new receipt-gated workflow explicitly. This is not evidence of universal commercial superiority or chip-signoff certification.
+
+## New in 0.3.0
+
+[Physical layout context and federated access-token authentication](docs/V0.3.md).
+Native GDS/OASIS extraction retains polygon holes and hierarchy placements. The
+`/physical` review workspace visualizes retained evidence; transform matches never
+approve waivers. Existing v0.2 records remain readable.
 
 ## New in 0.2.0
 
 Project-scoped, expiring/revocable tokens; indexed movement candidates; explicit dependency-graph context; atomic Git-reviewable proposal plans in the browser/API/CLI; offline Ed25519 signatures and ledger checkpoints; independent evidence-bundle replay; and a native-export guard against unapproved same-line suppression.
 
-Local validation: **283 passing tests, 90.76% line coverage**. In one constructed 10,000-finding repeated-rule workload, median pure-engine assessment improved **25.7x versus v0.1**, while recovering all intended review candidates without automatically waiving any changed finding. This is not a commercial benchmark. CI separately tests native Verilator and authenticated browser workflows; inspect the exact commit's checks rather than inferring success from a feature list.
+Historical local validation for v0.2: **283 passing tests, 90.76% line coverage**. In one constructed 10,000-finding repeated-rule workload, median pure-engine assessment improved **25.7x versus v0.1**, while recovering all intended review candidates without automatically waiving any changed finding. This is not a commercial benchmark. CI separately tests native Verilator and authenticated browser workflows; inspect the exact commit's checks rather than inferring success from a feature list.
 
 Read [the 0.2 guide, migration details and raw measurements](docs/V0.2.md) and [the evidence-based competitive assessment](docs/COMPETITIVE_EVIDENCE.md).
 
@@ -29,7 +36,7 @@ Use Python 3.11 or newer. From an extracted source archive or repository checkou
 ```bash
 python -m venv .venv
 source .venv/bin/activate                 # Windows: .venv\Scripts\activate
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,physical]'
 python -m pytest
 openwaiver demo --serve
 ```
@@ -40,7 +47,7 @@ Open **http://127.0.0.1:8765**. The command prints freshly generated access toke
 openwaiver demo --workspace another-demo --serve --port 8766
 ```
 
-The reference chip and every approval/evidence item in this demo are **synthetic**. No foundry data, customer design or proprietary rule deck is included. Screenshots show the application, not an independently verified tapeout.
+The reference chip and every approval/evidence item in this demo are **synthetic**. No foundry data, customer design or proprietary rule deck is included. Screenshots show the application, not an independently verified tapeout. Receipt-gated evaluation additionally requires an operator-provisioned trust policy; see the [release guide](docs/V0.4.md).
 
 ## What works
 
@@ -53,11 +60,13 @@ The reference chip and every approval/evidence item in this demo are **synthetic
 | Governance | Named owners, independent assigned reviewers, evidence, expiration or exact revision bounds, configurable quorum, two-reviewer default for CDC/RDC/timing and critical findings, no self-approval, and content-bound approvals. |
 | Review lifecycle | Propose → attach evidence → submit → approve/reject; amend/rebind resets approvals; revoke is terminal. Optimistic versions reject conflicting edits. |
 | Completeness | An incomplete run cannot pass. An absent finding marks its waiver unused only when that category was explicitly covered by a complete run. |
-| Release gating | Explicit multi-tool manifest, required categories, exact revision, import freshness and optional provenance requirements. Missing or ambiguous streams fail closed. |
+| Legacy release gating | Explicit multi-tool manifest, required categories, exact revision, import freshness and optional provenance requirements. Missing or ambiguous streams fail closed. |
+| Receipt-gated release assurance | Separately approved exact contracts, signed execution claims, pinned policy/design/tool provenance, execution age, risk budgets and independently replayable signed release capsules with optional live reconciliation. |
+| Physical evidence | Native KLayout GDS/OASIS extraction over declared geometry/layer/window coverage, retained holes/properties/placements, exact supported transforms and read-only comparison. |
 | Candidate comparison | Immutable snapshots capture the run, waiver set, policy and assessment. Historical results are not recomputed using today's approvals. |
-| Evidence and audit | Content-addressed attachments; transactionally committed SHA-256 event chain; historical waiver revisions; external-head verification; checksummed ZIP bundles with optional HMAC sealing. |
+| Evidence and audit | Content-addressed attachments; transactionally committed SHA-256 event chain; historical waiver revisions; external-head verification; checksummed ZIP bundles with optional HMAC sealing; Ed25519 signatures and checkpoints. |
 | Interchange | Deterministic per-waiver YAML, JSON/SARIF/JUnit/escaped HTML reports, a narrowly scoped Verilator `.vlt` exporter, and explicitly enabled importer/exporter plug-ins. |
-| Interface | Searchable/paginated findings, before/after geometry, waiver review drawers, snapshot comparison, evidence download, audit browser and policy editor. |
+| Interface | Searchable/paginated findings, before/after geometry, waiver review drawers, snapshot comparison, evidence download, audit browser, policy editor and project-authorized release evaluation. |
 
 ## Use a real workspace
 
@@ -92,14 +101,14 @@ openwaiver --db workspace/chip.sqlite3 export-yaml review-records
 
 Exit codes: **0** passed/success, **1** policy gate blocked, **2** command/input error. `assess` and `export` report findings without using a blocking exit code; use `gate` or `gate-release` in CI. A passing run is **not** a passing entire chip.
 
-For an entire release, edit the explicit checklist in `examples/release-manifest.yaml` and select the required run IDs:
+For the legacy release gate, edit the explicit checklist in `examples/release-manifest.yaml` and select the required run IDs:
 
 ```bash
 openwaiver --db workspace/chip.sqlite3 gate-release examples/release-manifest.yaml \
   --output release-gate.json
 ```
 
-An empty list is invalid. Missing checks, multiple unpinned matching runs, wrong revisions, incomplete coverage, expired import freshness and blocked findings prevent a pass. An omitted requirement is not magically inferred; protect the manifest in code review. Freshness is measured from import time, not independently attested EDA execution time.
+An empty list is invalid. Missing checks, multiple unpinned matching runs, wrong revisions, incomplete coverage, expired import freshness and blocked findings prevent a pass. An omitted requirement is not magically inferred; protect the manifest in code review. Legacy freshness is measured from import time, not independently attested EDA execution time. The [v0.4 receipt-gated workflow](docs/V0.4.md) separately checks authorized execution receipts and approved contracts.
 
 ## Native-tool integration is deliberately conservative
 
@@ -116,32 +125,36 @@ Export is refused if its native rule/file/line scope also contains an unapproved
 
 ## Documentation
 
+- [Receipt-gated release contracts and capsule verification](docs/V0.4.md)
+- [Current executed validation](docs/VALIDATION_V0.4.md)
 - [Input formats and schema examples](docs/FORMATS.md)
 - [Architecture, matching and lifecycle semantics](docs/ARCHITECTURE.md)
 - [Deployment and trust boundaries](SECURITY.md)
 - [Adapter development](docs/PLUGINS.md)
-- [Evidence, Git records and release gating](docs/OPERATIONS.md)
-- [Commercial comparison boundaries and roadmap](docs/ROADMAP.md)
-- [Reproducible local validation](docs/VALIDATION.md)
+- [Evidence, Git records and legacy release gating](docs/OPERATIONS.md)
+- [Commercial comparison protocol](docs/RELEASE_COMPARISON.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Historical v0.1 validation](docs/VALIDATION.md)
 
 OpenAPI is available at `/openapi.json`; interactive API documentation at `/docs`. API data endpoints require a bearer token. The documentation UI may load Swagger assets from an external CDN; the main application itself has no external frontend dependency or telemetry.
 
 ## Development
 
 ```bash
-python -m pip install -e '.[dev,browser]'
-python -m pytest --cov=openwaiver --cov-report=term-missing
+python -m pip install -e '.[dev,browser,physical]'
+python -m pytest --cov=openwaiver --cov-fail-under=90 --cov-report=term-missing
 python -m compileall -q src tests scripts
-node --check src/openwaiver/static/app.js
-node --check src/openwaiver/static/plans.js
+for source in src/openwaiver/static/*.js; do node --check "$source"; done
 playwright install chromium
 python scripts/browser_smoke.py
+python scripts/release_browser_smoke.py
+python scripts/native_release_rehearsal.py  # also requires native Verilator
 python scripts/benchmark.py --sizes 1000 10000 --output benchmark.json
 python scripts/make_preview.py --output OpenWaiver-preview.html
 python -m build
 ```
 
-The browser smoke test checks live authenticated workflows and responsive rendering. Benchmarks are synthetic and measure the pure assessment engine, **not** commercial-tool performance, the full database workflow, or production capacity. See the validation report for exactly what was run on this release.
+Browser checks exercise live authenticated workflows and responsive rendering. Native rehearsals execute installed open-source tools on synthetic designs. Benchmarks measure the pure assessment engine, **not** commercial-tool performance, the full database workflow, or production capacity. See the validation report for exactly what was run on this release.
 
 ## License
 

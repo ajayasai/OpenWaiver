@@ -22,7 +22,7 @@ from release_fixture import synthetic_workspace
 
 
 def main():
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright, expect
     p=argparse.ArgumentParser();p.add_argument("--output",default="validation-results/release-browser");args=p.parse_args()
     out=Path(args.output);out.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ow-release-browser-") as folder:
@@ -54,21 +54,21 @@ def main():
                 errors=[];page.on("pageerror",lambda e:errors.append(str(e)))
                 page.goto(url+"/releases")
                 page.fill("#token",token);page.click("#connect")
-                page.wait_for_function("document.querySelector('#identity').textContent.includes('release-reader')")
+                expect(page.locator("#identity")).to_contain_text("release-reader")
                 assert page.input_value("#token")==""
                 page.fill("#contract",canonical(contract))
                 page.fill("#receipts",canonical(receipts and [r.model_dump(mode="json") for r in receipts]))
-                page.click("#evaluate");page.wait_for_function("document.querySelector('#verdict').textContent === 'Contract satisfied'")
+                page.click("#evaluate");expect(page.locator("#verdict")).to_have_text("Contract satisfied")
                 assert page.locator(".check").count()==2
                 page.screenshot(path=str(out/"release-desktop.png"),full_page=True)
                 page.fill("#receipts","[]")
                 assert page.locator("#decision").is_hidden() and page.locator("#download").is_disabled()
-                page.click("#evaluate");page.wait_for_function("document.querySelector('#verdict').textContent === 'Release blocked'")
+                page.click("#evaluate");expect(page.locator("#verdict")).to_have_text("Release blocked")
                 assert "missing" in page.locator("#blockers").inner_text()
                 page.set_viewport_size({"width":390,"height":844})
-                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
                 page.screenshot(path=str(out/"release-mobile.png"),full_page=True)
-                assert page.evaluate("localStorage.length === 0 && sessionStorage.length === 0")
+                assert page.evaluate("() => localStorage.length === 0 && sessionStorage.length === 0")
                 page.click("#disconnect")
                 assert page.locator("#decision").is_hidden() and page.input_value("#contract")==""
                 assert page.input_value("#receipts")=="[]"
